@@ -39,7 +39,6 @@ DB_PATH = "farm_bot.db"
 MAX_INT = 9_223_372_036_854_775_807
 HUNGER_TIME = 10 * 3600          # 10 ч в секундах
 FOOD_PRICE = 500                # обычный корм
-AUTUMN_FOOD_PRICE = 1000        # осенний корм
 BASE_UPGRADE_COST = 5_000_000    # улучшение базы
 BASE_LIMIT_STEP = 5               # шаг увеличения лимита при улучшении базы
 SEASON_LENGTH = 60 * 24 * 3600   # 60 дней → один «сезон»
@@ -51,8 +50,6 @@ CHANNEL_LINK = "https://t.me/spiderfarminfo"
 
 # Картинки
 MAIN_MENU_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
-AUTUMN_EVENT_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
-AUTUMN_PORTAL_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"  # Можете заменить на свою картинку
 
 # ----------------------------------------------------------------------
 #   Изображения для разделов 
@@ -66,10 +63,10 @@ SECTION_IMAGES: Dict[str, str] = {
     "coins": "https://i.postimg.cc/SxnCk0JH/5355070803995130993.jpg",
     "casino": "https://i.postimg.cc/zvZBKMj2/5355070803995131009.jpg",
     "promo": "https://i.postimg.cc/kXCG50DB/5355070803995131030.jpg",
-    "autumn": AUTUMN_EVENT_IMG,
     "admin": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "logs": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "top": "https://i.postimg.cc/mg2rY7Y4/5355070803995131023.jpg",
+    "stats": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
 }
 # ----------------------------------------------------------------------
 #   Картинки питомцев ← NEW
@@ -132,7 +129,6 @@ def init_db() -> None:
             username TEXT,
             coins INTEGER DEFAULT 0,
             feed INTEGER DEFAULT 0,
-            autumn_feed INTEGER DEFAULT 0,
             weekly_coins INTEGER DEFAULT 0,
             last_reset INTEGER DEFAULT 0,
             secret_spider INTEGER DEFAULT 0,
@@ -169,7 +165,6 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS global_settings (
             id INTEGER PRIMARY KEY,
             global_bonus_active INTEGER DEFAULT 0,
-            autumn_event_active INTEGER DEFAULT 0,
             season_start INTEGER DEFAULT 0,
             season_number INTEGER DEFAULT 1
         );
@@ -180,9 +175,9 @@ def init_db() -> None:
     if cur.fetchone() is None:
         _execute(
             """
-            INSERT INTO global_settings (id, global_bonus_active, autumn_event_active,
+            INSERT INTO global_settings (id, global_bonus_active,
                                          season_start, season_number)
-            VALUES (1,0,0,?,1)
+            VALUES (1,0,?,1)
             """,
             (int(time.time()),),
         )
@@ -279,7 +274,6 @@ def ensure_user_columns() -> None:
     existing = {row["name"] for row in cur.fetchall()}
     needed = {
         "feed",
-        "autumn_feed",
         "weekly_coins",
         "last_reset",
         "secret_spider",
@@ -320,7 +314,7 @@ def ensure_global_settings_columns() -> None:
     """Миграция столбцов в global_settings (на случай будущих изменений)."""
     cur.execute("PRAGMA table_info(global_settings);")
     existing = {row["name"] for row in cur.fetchall()}
-    for col in ("autumn_event_active", "season_start", "season_number"):
+    for col in ("season_start", "season_number"):
         if col not in existing:
             log.info("Adding column %s to global_settings", col)
             default = 0 if col != "season_number" else 1
@@ -361,6 +355,50 @@ def log_user_action(user_id: int, action: str) -> None:
         "INSERT INTO admin_logs (user_id, action, ts) VALUES (?,?,?)",
         (user_id, action, int(time.time())),
     )
+
+
+def get_bot_stats() -> Dict[str, int]:
+    """Возвращает статистику бота."""
+    now = int(time.time())
+    day_ago = now - 86400  # 24 часа назад
+    week_ago = now - 604800  # 7 дней назад
+    
+    # Общее количество пользователей
+    cur.execute("SELECT COUNT(*) as total FROM users")
+    total_users = cur.fetchone()["total"]
+    
+    # Активные за последний день (у кого last_active больше day_ago)
+    # Сначала добавим колонку last_active если её нет
+    cur.execute("PRAGMA table_info(users)")
+    columns = [row["name"] for row in cur.fetchall()]
+    if "last_active" not in columns:
+        _execute("ALTER TABLE users ADD COLUMN last_active INTEGER DEFAULT 0")
+    
+    cur.execute("SELECT COUNT(*) as active_day FROM users WHERE last_active > ?", (day_ago,))
+    active_day = cur.fetchone()["active_day"]
+    
+    # Активные за последнюю неделю
+    cur.execute("SELECT COUNT(*) as active_week FROM users WHERE last_active > ?", (week_ago,))
+    active_week = cur.fetchone()["active_week"]
+    
+    # Общее количество монет в системе
+    cur.execute("SELECT SUM(coins) as total_coins FROM users")
+    total_coins = cur.fetchone()["total_coins"] or 0
+    
+    # Количество питомцев в системе
+    total_pets = 0
+    for field, *_ in ANIMAL_CONFIG:
+        cur.execute(f"SELECT SUM({field}) as count FROM users")
+        count = cur.fetchone()["count"] or 0
+        total_pets += count
+    
+    return {
+        "total_users": total_users,
+        "active_day": active_day,
+        "active_week": active_week,
+        "total_coins": total_coins,
+        "total_pets": total_pets,
+    }
 
 
 # ----------------------------------------------------------------------
@@ -904,19 +942,8 @@ async def auto_collect(context: ContextTypes.DEFAULT_TYPE) -> None:
         new_coins = min(user["coins"] + earned, MAX_INT)
         new_weekly = min(user["weekly_coins"] + earned, MAX_INT)
         
-        # Начисляем осенние монеты если событие активно
-        autumn_earned = 0
-        cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
-        if cur.fetchone()["autumn_event_active"]:
-            autumn_earned = earned // 100  # 1% от обычного дохода
-            new_autumn = min(user["autumn_coins"] + autumn_earned, MAX_INT)
-            update_user(uid, coins=new_coins, weekly_coins=new_weekly, 
-                       autumn_coins=new_autumn, last_active=now)
-        else:
-            update_user(uid, coins=new_coins, weekly_coins=new_weekly, last_active=now)
-        
-        log_user_action(uid, f"Получено {earned}🪙 (автосбор)" + 
-                            (f" и {autumn_earned}🍂" if autumn_earned > 0 else ""))
+        update_user(uid, coins=new_coins, weekly_coins=new_weekly, last_active=now)
+        log_user_action(uid, f"Получено {earned}🪙 (автосбор)")
 
 
 # ----------------------------------------------------------------------
@@ -1083,7 +1110,6 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("💰 Получить монеты", callback_data="get_coins"),
         InlineKeyboardButton("🎰 Казино", callback_data="casino_info"),
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
-        InlineKeyboardButton("🍂 Осенний портал", callback_data="autumn_portal"),
     ]
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
@@ -1241,28 +1267,17 @@ async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def feed_animal_step(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = query.from_user.id
     user = get_user(uid)
-    # Доступные типы корма
-    feed_type_btns = []
-    if user["feed"] > 0:
-        feed_type_btns.append(
-            InlineKeyboardButton("🍎 Обычный корм", callback_data="feed_type_normal")
-        )
-    if user["autumn_feed"] > 0:
-        feed_type_btns.append(
-            InlineKeyboardButton("🍂 Осенний корм", callback_data="feed_type_autumn")
-        )
-    if not feed_type_btns:
+    # Проверяем наличие корма
+    if user["feed"] <= 0:
         await edit_section(
             query,
-            caption="❌ У вас нет ни обычного, ни осеннего корма!",
+            caption="❌ У вас нет корма!",
             image_key="farm",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
             ),
         )
         return
-    # Сохраняем тип корма (по умолчанию – первый доступный)
-    context.user_data["feed_type"] = "normal" if user["feed"] > 0 else "autumn"
     # Выбираем животное
     animal_btns = []
     for field, _, emoji, name, *_ in ANIMAL_CONFIG:
@@ -1290,72 +1305,42 @@ async def feed_animal_step(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def feed_type_chosen(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обрабатываем выбор типа корма (обычный/осенний)."""
-    feed_type = query.data.split("_")[-1]          # normal / autumn
-    context.user_data["feed_type"] = feed_type
-    await edit_section(
-        query,
-        caption=f"✅ Выбран {'обычный' if feed_type == 'normal' else 'осенний'} корм. Выберите животное:",
-        image_key="farm",
-        reply_markup=query.message.reply_markup,
-    )
 
 
 async def feed_animal(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Кормим конкретное животное выбранным типом корма."""
+    """Кормим конкретное животное кормом."""
     uid = query.from_user.id
     user = get_user(uid)
     animal = query.data.split("_", 1)[1]           # field name
-    feed_type = context.user_data.get("feed_type", "normal")
-    if feed_type == "normal":
-        if user["feed"] == 0:
-            await edit_section(
-                query,
-                caption="❌ Нет обычного корма!",
-                image_key="farm",
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
-                ),
-            )
-            return
-        update_user(
-            uid,
-            feed=user["feed"] - 1,
-            feed_bonus_end=int(time.time()) + 3600,
-            reputation=user["reputation"] + 1,
+    
+    if user["feed"] == 0:
+        await edit_section(
+            query,
+            caption="❌ Нет корма!",
+            image_key="farm",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
+            ),
         )
-        log_user_action(uid, f"Кормил {animal} обычным кормом")
-        bonus_text = "+40% дохода"
-    else:   # autumn
-        if user["autumn_feed"] == 0:
-            await edit_section(
-                query,
-                caption="❌ Нет осеннего корма!",
-                image_key="farm",
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
-                ),
-            )
-            return
-        update_user(
-            uid,
-            autumn_feed=user["autumn_feed"] - 1,
-            autumn_bonus_end=int(time.time()) + 3600,
-            reputation=user["reputation"] + 1,
-        )
-        log_user_action(uid, f"Кормил {animal} осенним кормом")
-        bonus_text = "×2 дохода"
+        return
+    
+    update_user(
+        uid,
+        feed=user["feed"] - 1,
+        feed_bonus_end=int(time.time()) + 3600,
+        reputation=user["reputation"] + 1,
+    )
+    log_user_action(uid, f"Кормил {animal} кормом")
     set_pet_last_fed(uid, animal, int(time.time()))
+    
     await edit_section(
         query,
-        caption=f"🍎 {animal.capitalize()} покормлен! {bonus_text} на 1 ч.",
+        caption=f"🍎 {animal.capitalize()} покормлен! +40% дохода на 1 ч.",
         image_key="farm",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
         ),
     )
-
 
 # ----------------------------------------------------------------------
 #   Продажа животных
@@ -1654,14 +1639,6 @@ async def render_shop(query, context: ContextTypes.DEFAULT_TYPE, page: int = 0) 
             f"🍎 Корм ({format_num(FOOD_PRICE)}🪙)", callback_data="buy_feed"
         )
     ]
-    cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
-    if cur.fetchone()["autumn_event_active"]:
-        btns.append(
-            InlineKeyboardButton(
-                f"🍂 Осенний корм ({format_num(AUTUMN_FOOD_PRICE)}🪙)",
-                callback_data="buy_autumn_feed",
-            )
-        )
     for field, _, emoji, name, _, price, _ in items:
         btns.append(
             InlineKeyboardButton(
@@ -1837,37 +1814,8 @@ async def buy_feed(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def buy_autumn_feed(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    uid = query.from_user.id
-    user = get_user(uid)
-    if user["coins"] < AUTUMN_FOOD_PRICE:
-        await edit_section(
-            query,
-            caption=f"❌ Недостаточно монет. Нужно {format_num(AUTUMN_FOOD_PRICE)}🪙.",
-            image_key="shop",
-        )
-        return
-    update_user(
-        uid,
-        coins=user["coins"] - AUTUMN_FOOD_PRICE,
-        autumn_feed=user["autumn_feed"] + 1,
-        weekly_coins=user["weekly_coins"] + AUTUMN_FOOD_PRICE,
-        reputation=user["reputation"] + 1,
-    )
-    log_user_action(uid, "+1 осенний корм")
-    await edit_section(
-        query,
-        caption=f"✅ +1 осенний корм за {format_num(AUTUMN_FOOD_PRICE)}🪙.",
-        image_key="shop",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ В магазин", callback_data="shop")]]
-        ),
-    )
 
 
-# ----------------------------------------------------------------------
-#   Осеннее событие (инфо + админ‑переключатель)
-# ----------------------------------------------------------------------
 async def autumn_event_info(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
     active = cur.fetchone()["autumn_event_active"]
@@ -1877,7 +1825,7 @@ async def autumn_event_info(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🍂 Осеннее событие – временный бонус:\n"
         f"• При покупке осеннего корма (в магазине) вы получаете двойной доход\n"
         f"  на 1 ч.\n"
-        f"• Стоимость осеннего корма – {format_num(AUTUMN_FOOD_PRICE)}🪙.\n"
+        f"• Стоимость осеннего корма – 1.000🪙.\n"
         "• Бонус активен только пока событие включено администратором."
     )
     await edit_section(
@@ -2116,16 +2064,15 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
         return
     btns = [
+        InlineKeyboardButton("📊 Статистика бота", callback_data="admin_bot_stats"),
         InlineKeyboardButton("🔄 Сброс топа", callback_data="admin_reset_top"),
         InlineKeyboardButton("🔁 Сброс всех аккаунтов", callback_data="admin_reset_all"),
         InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
         InlineKeyboardButton("🕷️ Выдать паука‑секрета", callback_data="admin_give_spider"),
         InlineKeyboardButton("💰 Выдать монеты", callback_data="admin_set_coins"),
         InlineKeyboardButton("➕ Добавить монеты", callback_data="admin_add_coins"),
-        InlineKeyboardButton("🧹 Обнулить X‑ферму", callback_data="admin_reset_xfarm"),
         InlineKeyboardButton("📜 Журнал действий", callback_data="admin_view_logs"),
         InlineKeyboardButton("🎟️ Создать промокод", callback_data="admin_create_promo"),
-        InlineKeyboardButton("🍂 Переключить осеннее событие", callback_data="admin_toggle_autumn"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back"),
     ]
     kb = chunk_buttons(btns, per_row=2)
@@ -2137,12 +2084,109 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def admin_bot_stats(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает статистику бота в админ панели."""
+    if not is_admin(query.from_user.id):
+        await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    
+    stats = get_bot_stats()
+    
+    text = (
+        f"📊 Статистика бота 📊\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Всего пользователей: {format_num(stats['total_users'])}\n"
+        f"🟢 Активных за сутки: {format_num(stats['active_day'])}\n"
+        f"🔵 Активных за неделю: {format_num(stats['active_week'])}\n"
+        f"💰 Всего монет в системе: {format_num(stats['total_coins'])}\n"
+        f"🐾 Всего питомцев в системе: {format_num(stats['total_pets'])}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ Обновлено: {time.strftime('%d.%m.%Y %H:%M:%S')}"
+    )
+    
+    refresh_btn = InlineKeyboardButton("🔄 Обновить", callback_data="admin_bot_stats")
+    back_btn = InlineKeyboardButton("⬅️ Назад", callback_data="admin")
+    kb = InlineKeyboardMarkup([[refresh_btn], [back_btn]])
+    
+    await edit_section(
+        query,
+        caption=text,
+        image_key="stats",
+        reply_markup=kb,
+    )
+
+
+async def admin_view_logs(query, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Показывает журнал действий пользователей с пагинацией."""
+    if not is_admin(query.from_user.id):
+        await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    
+    limit = 15
+    offset = page * limit
+    
+    # Получаем записи с пагинацией
+    cur.execute(
+        "SELECT user_id, action, ts FROM admin_logs ORDER BY ts DESC LIMIT ? OFFSET ?",
+        (limit, offset)
+    )
+    rows = cur.fetchall()
+    
+    # Получаем общее количество записей
+    cur.execute("SELECT COUNT(*) as total FROM admin_logs")
+    total = cur.fetchone()["total"]
+    total_pages = (total - 1) // limit + 1 if total > 0 else 1
+    
+    if not rows:
+        txt = "📜 Журнал пуст."
+    else:
+        txt = f"📜 Журнал действий (стр. {page + 1}/{total_pages}):\n"
+        txt += f"━━━━━━━━━━━━━━━━━━━━\n"
+        for row in rows:
+            t = time.strftime("%d.%m %H:%M", time.localtime(row["ts"]))
+            # Получаем username если есть
+            cur.execute("SELECT username FROM users WHERE user_id = ?", (row["user_id"],))
+            user_row = cur.fetchone()
+            username = user_row["username"] if user_row and user_row["username"] else f"ID{row['user_id']}"
+            txt += f"[{t}] {username}: {row['action']}\n"
+        txt += f"━━━━━━━━━━━━━━━━━━━━\n"
+        txt += f"Всего записей: {total}"
+    
+    # Кнопки навигации
+    btns = []
+    nav_btns = []
+    if page > 0:
+        nav_btns.append(InlineKeyboardButton("⏪ Пред.", callback_data=f"logs_page_{page-1}"))
+    if page < total_pages - 1:
+        nav_btns.append(InlineKeyboardButton("След. ⏩", callback_data=f"logs_page_{page+1}"))
+    
+    if nav_btns:
+        btns.append(nav_btns)
+    
+    btns.append([InlineKeyboardButton("🔄 Обновить", callback_data="admin_view_logs")])
+    btns.append([InlineKeyboardButton("🗑️ Очистить журнал", callback_data="admin_clear_logs")])
+    btns.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin")])
+    
+    await edit_section(
+        query,
+        caption=txt,
+        image_key="logs",
+        reply_markup=InlineKeyboardMarkup(btns),
+    )
+    
+    # Сохраняем текущую страницу
+    context.user_data["logs_page"] = page
+
+
 async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает все кнопки, начинающиеся с «admin_». """
     data = query.data
     uid = query.from_user.id
     if not is_admin(uid):
         await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    if data == "admin_bot_stats":
+        await admin_bot_stats(query, context)
         return
     if data == "admin_reset_top":
         _execute(
@@ -2208,25 +2252,15 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(query, caption="✅ X‑ферма уже отсутствует.", image_key="admin")
         return
     if data == "admin_view_logs":
-        cur.execute(
-            "SELECT user_id, action, ts FROM admin_logs ORDER BY ts DESC LIMIT 20"
-        )
-        rows = cur.fetchall()
-        if not rows:
-            txt = "📜 Журнал пуст."
-        else:
-            txt = "📜 Последние действия игроков:\n"
-            for row in rows:
-                t = time.strftime("%d.%m %H:%M", time.localtime(row["ts"]))
-                txt += f"[{t}] ID {row['user_id']}: {row['action']}\n"
-        await edit_section(
-            query,
-            caption=txt,
-            image_key="logs",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
-            ),
-        )
+        await admin_view_logs(query, context)
+        return
+    if data == "admin_clear_logs":
+        _execute("DELETE FROM admin_logs")
+        await edit_section(query, caption="✅ Журнал очищен.", image_key="admin")
+        return
+    if data.startswith("logs_page_"):
+        page = int(data.split("_")[-1])
+        await admin_view_logs(query, context, page)
         return
     if data == "admin_create_promo":
         context.user_data["awaiting_create_promo"] = True
@@ -2244,9 +2278,6 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             ),
         )
         return
-    if data == "admin_toggle_autumn":
-        await toggle_autumn_event(query, context)
-        return
     await edit_section(query, caption="❓ Неизвестная команда.", image_key="admin")
 
 
@@ -2260,6 +2291,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         pass
     data = query.data
+    # Обновляем время последней активности
+    update_user(query.from_user.id, last_active=int(time.time()))
     # ------------------- Универсальная «Назад» -------------------
     if data == "back":
         await show_main_menu(update, context, edit=True)
@@ -2275,9 +2308,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # ------------------- Кормление -------------------
     if data == "feed_animal":
         await feed_animal_step(query, context)
-        return
-    if data.startswith("feed_type_"):
-        await feed_type_chosen(query, context)
         return
     if data.startswith("feed_"):
         await feed_animal(query, context)
@@ -2337,9 +2367,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "buy_feed":
         await buy_feed(query, context)
         return
-    if data == "buy_autumn_feed":
-        await buy_autumn_feed(query, context)
-        return
     # ------------------- Фермеры -------------------
     if data == "farmers_shop":
         await farmers_shop(query, context)
@@ -2349,13 +2376,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if data.startswith("farmer_buy_"):
         await farmer_buy_confirm(query, context)
-        return
-    # ------------------- Осеннее событие -------------------
-    if data == "autumn_event":
-        await autumn_event_info(query, context)
-        return
-    if data == "admin_toggle_autumn":
-        await toggle_autumn_event(query, context)
         return
     # ------------------- Промокоды -------------------
     if data == "promo":
@@ -2380,6 +2400,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     txt = update.message.text if update.message else ""
     user = update.effective_user
     db_user = get_user(user.id)
+    # Обновляем время последней активности
+    update_user(user.id, last_active=int(time.time()))
     # Проверяем, не наступил ли новый сезон
     check_and_reset_season()
     # Реферальный параметр: /start <ref_id>
