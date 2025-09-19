@@ -267,6 +267,18 @@ def init_db() -> None:
         );
         """
     )
+    # ---------- lost_pets (для восстановления) ----------
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS lost_pets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            pet_field TEXT,
+            quantity INTEGER,
+            lost_time INTEGER
+        );
+        """
+    )
     conn.commit()
 
 
@@ -331,6 +343,21 @@ def ensure_promo_columns() -> None:
     if "used" not in cols:
         log.info("Adding column `used` to promo_codes")
         _execute("ALTER TABLE promo_codes ADD COLUMN used INTEGER DEFAULT 0")
+
+
+def ensure_lost_pets_table() -> None:
+    """Создаёт таблицу lost_pets, если её ещё нет."""
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS lost_pets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            pet_field TEXT,
+            quantity INTEGER,
+            lost_time INTEGER
+        );
+        """
+    )
 
 
 # ----------------------------------------------------------------------
@@ -431,6 +458,37 @@ def delete_pet_last_fed(user_id: int, pet_field: str) -> None:
         "DELETE FROM pet_last_fed WHERE user_id = ? AND pet_field = ?",
         (user_id, pet_field),
     )
+
+
+def save_lost_pets(user_id: int, pet_field: str, quantity: int, lost_time: int) -> None:
+    """Сохраняет информацию о потерянных питомцах."""
+    _execute(
+        "INSERT INTO lost_pets (user_id, pet_field, quantity, lost_time) VALUES (?,?,?,?)",
+        (user_id, pet_field, quantity, lost_time),
+    )
+
+
+def get_lost_pets(max_hours: int = 48) -> List[sqlite3.Row]:
+    """Возвращает список потерянных питомцев за последние max_hours часов."""
+    min_time = int(time.time()) - (max_hours * 3600)
+    cur.execute(
+        "SELECT * FROM lost_pets WHERE lost_time >= ? ORDER BY lost_time DESC",
+        (min_time,),
+    )
+    return cur.fetchall()
+
+
+def restore_pets(user_id: int, pet_field: str, quantity: int) -> None:
+    """Восстанавливает питомцев пользователю."""
+    user = get_user(user_id)
+    current = user[pet_field]
+    update_user(user_id, **{pet_field: current + quantity})
+    set_pet_last_fed(user_id, pet_field, int(time.time()))
+    
+    
+def delete_lost_pet_record(record_id: int) -> None:
+    """Удаляет запись о потерянных питомцах."""
+    _execute("DELETE FROM lost_pets WHERE id = ?", (record_id,))
 
 
 # ----------------------------------------------------------------------
@@ -768,6 +826,67 @@ ANIMAL_CONFIG: List[Tuple[str, int, str, str, str, int, str]] = [
     ("trrr",  10_000_000, "🦊", "Лунный «Тканевый лис»",    "ultra",
         60_000_000_000_000,
         "Может менять форму своего тела, «растягивая» или «сжимая» собственные нити, тем самым прячась в тканевых лабиринтах."),
+    # ------------------- БОЖЕСТВЕННЫЕ (20 новых дорогих питомцев) -------------------
+    ("reality_shaper", 15_000_000, "🔮", "Формирователь Реальности", "divine",
+        100_000_000_000_000,
+        "Меняет законы физики вокруг себя, создавая карманы чистого золота из воздуха."),
+    ("infinity_serpent", 18_000_000, "🐍", "Змей Бесконечности", "divine",
+        150_000_000_000_000,
+        "Его тело не имеет конца, каждая чешуйка – новая галактика монет."),
+    ("cosmos_devourer", 22_000_000, "🌌", "Пожиратель Космоса", "divine",
+        200_000_000_000_000,
+        "Поглощает целые звёздные системы, превращая их в чистую прибыль."),
+    ("dream_weaver", 25_000_000, "💭", "Ткач Снов", "divine",
+        250_000_000_000_000,
+        "Создаёт реальность из снов, где каждая мысль – миллион монет."),
+    ("chaos_emperor", 30_000_000, "👹", "Император Хаоса", "divine",
+        300_000_000_000_000,
+        "Правит измерением чистого хаоса, где энтропия генерирует богатство."),
+    ("light_bringer", 35_000_000, "✨", "Несущий Свет", "divine",
+        400_000_000_000_000,
+        "Первый луч света во вселенной, его сияние – чистое золото."),
+    ("void_architect", 40_000_000, "🏛️", "Архитектор Пустоты", "divine",
+        500_000_000_000_000,
+        "Строит миры из ничего, каждый кирпич стоит миллиарды."),
+    ("elder_god", 50_000_000, "🗿", "Древний Бог", "divine",
+        750_000_000_000_000,
+        "Существовал до времени, его дыхание создаёт валюты."),
+    ("multiverse_guardian", 60_000_000, "🛡️", "Страж Мультивселенной", "divine",
+        1_000_000_000_000_000,
+        "Защищает все реальности, взимая плату в виде бесконечных монет."),
+    ("eternity_phoenix", 75_000_000, "🔥", "Феникс Вечности", "divine",
+        1_500_000_000_000_000,
+        "Никогда не умирает окончательно, каждое возрождение удваивает богатство."),
+    ("primordial_titan", 100_000_000, "⛰️", "Первобытный Титан", "divine",
+        2_000_000_000_000_000,
+        "Первое существо, чьи шаги создали горы золота."),
+    ("quantum_deity", 125_000_000, "⚛️", "Квантовое Божество", "divine",
+        3_000_000_000_000_000,
+        "Существует во всех состояниях одновременно, генерируя квантовые монеты."),
+    ("stellar_creator", 150_000_000, "🌟", "Создатель Звёзд", "divine",
+        5_000_000_000_000_000,
+        "Лепит звёзды из космической пыли, каждая стоит квинтиллионы."),
+    ("omega_entity", 200_000_000, "Ω", "Омега-Сущность", "divine",
+        10_000_000_000_000_000,
+        "Конец всего сущего, где всё превращается в абсолютное богатство."),
+    ("alpha_origin", 250_000_000, "Α", "Альфа-Исток", "divine",
+        15_000_000_000_000_000,
+        "Начало всех начал, источник бесконечного дохода."),
+    ("paradox_beast", 300_000_000, "🔄", "Зверь Парадокса", "divine",
+        20_000_000_000_000_000,
+        "Нарушает причинно-следственные связи, создавая монеты из будущего."),
+    ("nexus_core", 400_000_000, "💠", "Ядро Нексуса", "divine",
+        30_000_000_000_000_000,
+        "Точка схождения всех реальностей, где валюты сливаются в одну."),
+    ("absolute_zero", 500_000_000, "❄️", "Абсолютный Ноль", "divine",
+        50_000_000_000_000_000,
+        "Замораживает энтропию, превращая остановленное время в монеты."),
+    ("infinity_plus", 750_000_000, "♾️", "Бесконечность Плюс", "divine",
+        100_000_000_000_000_000,
+        "Больше чем бесконечность, генерирует невообразимые суммы."),
+    ("true_omnipotence", 1_000_000_000, "🌐", "Истинное Всемогущество", "divine",
+        1_000_000_000_000_000_000,
+        "Абсолютная власть над всем – создаёт валюты силой мысли."),
 ]
 
 # ----------------------------------------------------------------------
@@ -886,6 +1005,8 @@ async def check_hunger(context: ContextTypes.DEFAULT_TYPE) -> None:
                 set_pet_last_fed(uid, field, int(time.time()))
                 continue
             if time.time() - last_fed > HUNGER_TIME:
+                # Сохраняем информацию о потерянных питомцах для возможного восстановления
+                save_lost_pets(uid, field, cnt, int(time.time()))
                 update_user(uid, **{field: 0})
                 delete_pet_last_fed(uid, field)
                 log_user_action(uid, f"Потеряно всех {field} из‑за голода")
@@ -2058,6 +2179,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("📜 Журнал действий", callback_data="admin_view_logs"),
         InlineKeyboardButton("🎟️ Создать промокод", callback_data="admin_create_promo"),
         InlineKeyboardButton("🍂 Переключить осеннее событие", callback_data="admin_toggle_autumn"),
+        InlineKeyboardButton("🔄 Восстановить питомцев", callback_data="admin_restore_pets"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back"),
     ]
     kb = chunk_buttons(btns, per_row=2)
@@ -2066,6 +2188,67 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         caption="🔥 Админ‑панель 🔥",
         image_key="admin",
         reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def admin_restore_pets(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Восстанавливает питомцев, потерянных за последние 48 часов."""
+    lost_pets = get_lost_pets(max_hours=48)
+    
+    if not lost_pets:
+        await edit_section(
+            query,
+            caption="✅ Нет потерянных питомцев за последние 48 часов.",
+            image_key="admin",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+            ),
+        )
+        return
+    
+    restored_count = 0
+    restored_users = set()
+    
+    for record in lost_pets:
+        try:
+            # Восстанавливаем питомцев
+            restore_pets(record["user_id"], record["pet_field"], record["quantity"])
+            
+            # Удаляем запись из таблицы потерянных
+            delete_lost_pet_record(record["id"])
+            
+            restored_count += 1
+            restored_users.add(record["user_id"])
+            
+            # Логируем действие
+            log_user_action(
+                record["user_id"], 
+                f"Восстановлено {record['quantity']} {record['pet_field']} (админ)"
+            )
+            
+            # Уведомляем пользователя
+            try:
+                await context.bot.send_message(
+                    record["user_id"],
+                    f"🎉 Администратор восстановил вам {record['quantity']} {record['pet_field']}!"
+                )
+            except Exception:
+                pass
+                
+        except Exception as e:
+            log.error(f"Ошибка восстановления питомцев: {e}")
+    
+    await edit_section(
+        query,
+        caption=(
+            f"✅ Восстановление завершено!\n"
+            f"📊 Восстановлено записей: {restored_count}\n"
+            f"👥 Пользователей затронуто: {len(restored_users)}"
+        ),
+        image_key="admin",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+        ),
     )
 
 
@@ -2178,6 +2361,9 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
+        return
+    if data == "admin_restore_pets":
+        await admin_restore_pets(query, context)
         return
     await edit_section(query, caption="❓ Неизвестная команда.", image_key="admin")
 
@@ -2801,6 +2987,7 @@ def main() -> None:
     ensure_animal_columns()
     ensure_global_settings_columns()
     ensure_promo_columns()          # <-- важный миграционный шаг
+    ensure_lost_pets_table()        # <-- создаём таблицу для восстановления питомцев
     if args.migrate:
         log.info("Миграция завершена, колонки добавлены.")
         return
