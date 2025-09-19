@@ -2351,6 +2351,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await farmer_buy_confirm(query, context)
         return
     # ------------------- Осеннее событие -------------------
+    if data == "autumn_portal":
+        await autumn_event_info(query, context)
+        return
     if data == "autumn_event":
         await autumn_event_info(query, context)
         return
