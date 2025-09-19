@@ -148,7 +148,8 @@ def init_db() -> None:
             subscribe_claimed INTEGER DEFAULT 0,
             chat_claimed INTEGER DEFAULT 0,
             click_reward_last INTEGER DEFAULT 0,
-            referred_by INTEGER DEFAULT 0
+            referred_by INTEGER DEFAULT 0,
+            last_activity INTEGER DEFAULT 0
         );
         """
     )
@@ -294,6 +295,7 @@ def ensure_user_columns() -> None:
         "chat_claimed",
         "click_reward_last",
         "referred_by",
+        "last_activity",  # Новое поле для отслеживания активности
     }
     for col in needed:
         if col not in existing:
@@ -358,6 +360,48 @@ def log_user_action(user_id: int, action: str) -> None:
     )
 
 
+def get_bot_statistics() -> Dict[str, int]:
+    """Возвращает статистику бота."""
+    now = int(time.time())
+    hour_ago = now - 3600
+    day_ago = now - 86400
+    
+    # Общее количество пользователей
+    cur.execute("SELECT COUNT(*) as total FROM users")
+    total_users = cur.fetchone()["total"]
+    
+    # Активные за последний час
+    cur.execute("SELECT COUNT(*) as active FROM users WHERE last_activity > ?", (hour_ago,))
+    active_hour = cur.fetchone()["active"]
+    
+    # Активные за последние 24 часа
+    cur.execute("SELECT COUNT(*) as active FROM users WHERE last_activity > ?", (day_ago,))
+    active_day = cur.fetchone()["active"]
+    
+    # Общее количество монет в экономике
+    cur.execute("SELECT SUM(coins) as total_coins FROM users")
+    total_coins = cur.fetchone()["total_coins"] or 0
+    
+    # Количество питомцев
+    animal_fields = [field for field, *_ in ANIMAL_CONFIG]
+    animal_sum_query = " + ".join(f"COALESCE({field}, 0)" for field in animal_fields)
+    cur.execute(f"SELECT SUM({animal_sum_query}) as total_pets FROM users")
+    total_pets = cur.fetchone()["total_pets"] or 0
+    
+    return {
+        "total_users": total_users,
+        "active_hour": active_hour,
+        "active_day": active_day,
+        "total_coins": total_coins,
+        "total_pets": total_pets,
+    }
+
+
+def update_activity(user_id: int) -> None:
+    """Обновляет время последней активности пользователя."""
+    _execute("UPDATE users SET last_activity = ? WHERE user_id = ?", (int(time.time()), user_id))
+
+
 # ----------------------------------------------------------------------
 #   Утилиты
 # ----------------------------------------------------------------------
@@ -393,7 +437,7 @@ def get_user(user_id: int) -> sqlite3.Row:
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
     if not row:
-        _execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        _execute("INSERT INTO users (user_id, last_activity) VALUES (?, ?)", (user_id, int(time.time())))
         cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
         row = cur.fetchone()
     # «Летучее» добавление новых колонок, если они вдруг появятся позже
@@ -2048,6 +2092,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
         return
     btns = [
+        InlineKeyboardButton("📊 Статистика бота", callback_data="admin_bot_stats"),
         InlineKeyboardButton("🔄 Сброс топа", callback_data="admin_reset_top"),
         InlineKeyboardButton("🔁 Сброс всех аккаунтов", callback_data="admin_reset_all"),
         InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
@@ -2075,6 +2120,30 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = query.from_user.id
     if not is_admin(uid):
         await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    if data == "admin_bot_stats":
+        stats = get_bot_statistics()
+        caption = (
+            "📊 Статистика бота\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 Всего пользователей: {format_num(stats['total_users'])}\n"
+            f"🟢 Активных за час: {format_num(stats['active_hour'])}\n"
+            f"📅 Активных за 24 часа: {format_num(stats['active_day'])}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Всего монет в игре: {format_num(stats['total_coins'])}\n"
+            f"🐾 Всего питомцев: {format_num(stats['total_pets'])}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 Активность за час: {stats['active_hour'] / max(stats['total_users'], 1) * 100:.1f}%\n"
+            f"📊 Активность за сутки: {stats['active_day'] / max(stats['total_users'], 1) * 100:.1f}%"
+        )
+        await edit_section(
+            query, 
+            caption=caption, 
+            image_key="admin",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+            ),
+        )
         return
     if data == "admin_reset_top":
         _execute(
@@ -2192,6 +2261,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         pass
     data = query.data
+    # Обновляем активность пользователя
+    update_activity(query.from_user.id)
     # ------------------- Универсальная «Назад» -------------------
     if data == "back":
         await show_main_menu(update, context, edit=True)
@@ -2312,6 +2383,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     txt = update.message.text if update.message else ""
     user = update.effective_user
     db_user = get_user(user.id)
+    # Обновляем имя пользователя и активность
+    if user.username:
+        update_user(user.id, username=user.username)
+    update_activity(user.id)
     # Проверяем, не наступил ли новый сезон
     check_and_reset_season()
     # Реферальный параметр: /start <ref_id>
@@ -2346,6 +2421,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Обрабатывает все текстовые сообщения, не являющиеся командами."""
     user = update.effective_user
     txt = update.message.text if update.message else ""
+    
+    # Обновляем активность пользователя
+    update_activity(user.id)
 
     # ------------------- Рассылка (админ) -------------------
     if context.user_data.get("awaiting_broadcast"):
