@@ -52,6 +52,7 @@ CHANNEL_LINK = "https://t.me/spiderfarminfo"
 # Картинки
 MAIN_MENU_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
 AUTUMN_EVENT_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
+AUTUMN_PORTAL_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"  # Можете заменить на свою картинку
 
 # ----------------------------------------------------------------------
 #   Изображения для разделов 
@@ -148,7 +149,9 @@ def init_db() -> None:
             subscribe_claimed INTEGER DEFAULT 0,
             chat_claimed INTEGER DEFAULT 0,
             click_reward_last INTEGER DEFAULT 0,
-            referred_by INTEGER DEFAULT 0
+            referred_by INTEGER DEFAULT 0,
+            last_active INTEGER DEFAULT 0,
+            autumn_coins INTEGER DEFAULT 0
         );
         """
     )
@@ -294,6 +297,8 @@ def ensure_user_columns() -> None:
         "chat_claimed",
         "click_reward_last",
         "referred_by",
+        "last_active",
+        "autumn_coins",
     }
     for col in needed:
         if col not in existing:
@@ -768,6 +773,37 @@ ANIMAL_CONFIG: List[Tuple[str, int, str, str, str, int, str]] = [
     ("trrr",  10_000_000, "🦊", "Лунный «Тканевый лис»",    "ultra",
         60_000_000_000_000,
         "Может менять форму своего тела, «растягивая» или «сжимая» собственные нити, тем самым прячась в тканевых лабиринтах."),
+    # ------------------- НОВЫЕ СУПЕР-ДОРОГИЕ ПИТОМЦЫ -------------------
+    ("infinity_wyrm",      15_000_000, "🐉", "Бесконечный Змей",        "beyond", 
+        100_000_000_000_000,
+        "Существует во всех измерениях одновременно, его тело не имеет конца."),
+    ("reality_shaper",     20_000_000, "🌀", "Формирователь Реальности", "beyond",
+        200_000_000_000_000,
+        "Способен изменять законы физики вокруг себя, превращая воздух в золото."),
+    ("chaos_emperor",      25_000_000, "👑", "Император Хаоса",         "beyond",
+        350_000_000_000_000,
+        "Правитель всех измерений, его присутствие искажает пространство-время."),
+    ("primordial_titan",   30_000_000, "🗿", "Первородный Титан",       "beyond",
+        500_000_000_000_000,
+        "Существовал до создания вселенной, его дыхание создаёт новые миры."),
+    ("cosmic_devourer",    40_000_000, "🕳️", "Космический Пожиратель",   "beyond",
+        750_000_000_000_000,
+        "Поглощает целые галактики, превращая их в чистую энергию монет."),
+    ("eternal_guardian",   50_000_000, "🛡️", "Вечный Страж",            "beyond",
+        1_000_000_000_000_000,
+        "Охраняет границы реальности, каждый его шаг создаёт новые вселенные."),
+    ("void_architect",     75_000_000, "🏛️", "Архитектор Пустоты",      "beyond",
+        2_000_000_000_000_000,
+        "Строит миры из ничего, его творения генерируют бесконечный поток монет."),
+    ("time_paradox",       100_000_000, "⏳", "Временной Парадокс",      "beyond",
+        5_000_000_000_000_000,
+        "Существует вне времени, может собирать монеты из прошлого и будущего."),
+    ("quantum_god",        150_000_000, "⚛️", "Квантовый Бог",           "beyond",
+        10_000_000_000_000_000,
+        "Существует и не существует одновременно, нарушает все законы мироздания."),
+    ("absolute_being",     250_000_000, "✨", "Абсолютное Существо",     "beyond",
+        50_000_000_000_000_000,
+        "Воплощение самой концепции существования, источник всех монет во вселенной."),
 ]
 
 # ----------------------------------------------------------------------
@@ -859,6 +895,7 @@ def calculate_income_per_min(user: sqlite3.Row) -> int:
 async def auto_collect(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Каждую минуту начисляем доход."""
     cur.execute("SELECT user_id FROM users")
+    now = int(time.time())
     for (uid,) in cur.fetchall():
         user = get_user(uid)
         earned = calculate_income_per_min(user)
@@ -866,8 +903,20 @@ async def auto_collect(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         new_coins = min(user["coins"] + earned, MAX_INT)
         new_weekly = min(user["weekly_coins"] + earned, MAX_INT)
-        update_user(uid, coins=new_coins, weekly_coins=new_weekly)
-        log_user_action(uid, f"Получено {earned}🪙 (автосбор)")
+        
+        # Начисляем осенние монеты если событие активно
+        autumn_earned = 0
+        cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
+        if cur.fetchone()["autumn_event_active"]:
+            autumn_earned = earned // 100  # 1% от обычного дохода
+            new_autumn = min(user["autumn_coins"] + autumn_earned, MAX_INT)
+            update_user(uid, coins=new_coins, weekly_coins=new_weekly, 
+                       autumn_coins=new_autumn, last_active=now)
+        else:
+            update_user(uid, coins=new_coins, weekly_coins=new_weekly, last_active=now)
+        
+        log_user_action(uid, f"Получено {earned}🪙 (автосбор)" + 
+                            (f" и {autumn_earned}🍂" if autumn_earned > 0 else ""))
 
 
 # ----------------------------------------------------------------------
@@ -1034,7 +1083,7 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("💰 Получить монеты", callback_data="get_coins"),
         InlineKeyboardButton("🎰 Казино", callback_data="casino_info"),
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
-        InlineKeyboardButton("🍂 Осеннее событие", callback_data="autumn_event"),
+        InlineKeyboardButton("🍂 Осенний портал", callback_data="autumn_portal"),
     ]
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
@@ -1098,6 +1147,21 @@ async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     now = time.time()
     # Список животных
     lines = []
+    # Сначала показываем осенних питомцев (если есть)
+    autumn_pets = get_user_autumn_pets(uid)
+    for pet_data in autumn_pets:
+        pet_field = pet_data["pet_field"]
+        qty = pet_data["qty"]
+        # Ищем информацию о питомце в AUTUMN_PETS_CONFIG
+        for ap_field, ap_inc, ap_emoji, ap_name, ap_price, ap_desc in AUTUMN_PETS_CONFIG:
+            if ap_field == pet_field:
+                inc_total = ap_inc * qty
+                lines.append(
+                    f"{ap_emoji} {ap_name} (🍂): {qty} (+{format_num(inc_total)}🪙/мин)"
+                )
+                break
+    
+    # Затем обычные питомцы
     for field, inc, emoji, name, *_ in ANIMAL_CONFIG:
         cnt = user[field]
         if cnt == 0:
@@ -1483,6 +1547,7 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 ID: {user['user_id']}\n"
         f"💰 Монеты: {format_num(user['coins'])}\n"
+        f"🍂 Осенние монеты: {format_num(user['autumn_coins'])}\n"
         f"💰 Доход за минуту: {format_num(income_min)}🪙\n"
         f"🏗️ База: уровень {user['base_level']} (лимит: {user['pet_limit']})\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1491,6 +1556,9 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"⚡ Титул: {get_status(user['coins'])}\n"
         f"🕷️ Паук‑секрет: {'Да' if user['secret_spider'] else 'Нет'}\n"
         f"⏳ До конца сезона №{season_number}: {h}ч {m}м\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 Активных за 24ч: {get_active_users_24h()}\n"
+        f"🌾 Всего фермеров: {get_total_farmers()}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
