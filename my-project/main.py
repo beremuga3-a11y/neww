@@ -101,6 +101,23 @@ ANIMAL_IMAGES: Dict[str, str] = {
     "dragons":    "https://i.postimg.cc/6qh5THc7/dragons.jpg",
     # Если ссылки нет – будет использовано изображение по умолчанию (MAIN_MENU_IMG)
 }
+
+# ----------------------------------------------------------------------
+#   Осенние питомцы (дают осенние монеты)
+# ----------------------------------------------------------------------
+# (field_name, autumn_income_per_minute, emoji, full_name, price, description)
+AUTUMN_PETS_CONFIG: List[Tuple[str, int, str, str, int, str]] = [
+    ("autumn_spiders",     50, "🕷️", "Осенние пауки",         15000,
+        "Ткут золотые паутины, приносящие осенние монеты."),
+    ("autumn_bats",        30, "🦇", "Осенние летучие мыши",  8000,
+        "Летают в осенних сумерках, собирая магические листья."),
+    ("autumn_owls",        80, "🦉", "Осенние совы",         25000,
+        "Мудрые хранители осенних секретов."),
+    ("autumn_foxes",      120, "🦊", "Осенние лисы",         40000,
+        "Рыжие охотники осенних лесов."),
+    ("autumn_wolves",     200, "🐺", "Осенние волки",        75000,
+        "Воют под осенней луной, призывая богатство."),
+]
 # ----------------------------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -270,6 +287,26 @@ def init_db() -> None:
         );
         """
     )
+    # ---------- autumn_pets ----------
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS autumn_pets (
+            user_id INTEGER,
+            pet_field TEXT,
+            qty INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, pet_field)
+        );
+        """
+    )
+    # ---------- referrals ----------
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS referrals (
+            user_id INTEGER PRIMARY KEY,
+            referral_count INTEGER DEFAULT 0
+        );
+        """
+    )
     conn.commit()
 
 
@@ -435,6 +472,74 @@ def delete_pet_last_fed(user_id: int, pet_field: str) -> None:
     _execute(
         "DELETE FROM pet_last_fed WHERE user_id = ? AND pet_field = ?",
         (user_id, pet_field),
+    )
+
+
+# ----------------------------------------------------------------------
+#   Функции для работы с осенними питомцами
+# ----------------------------------------------------------------------
+def get_user_autumn_pets(user_id: int) -> List[sqlite3.Row]:
+    """Возвращает список осенних питомцев пользователя."""
+    cur.execute(
+        "SELECT pet_field, qty FROM autumn_pets WHERE user_id = ? AND qty > 0",
+        (user_id,)
+    )
+    return cur.fetchall()
+
+
+def update_autumn_pet(user_id: int, pet_field: str, qty: int) -> None:
+    """Обновляет количество осенних питомцев."""
+    _execute(
+        """
+        INSERT INTO autumn_pets (user_id, pet_field, qty)
+        VALUES (?,?,?)
+        ON CONFLICT(user_id, pet_field) DO UPDATE SET qty=excluded.qty
+        """,
+        (user_id, pet_field, qty),
+    )
+
+
+def get_autumn_pet_qty(user_id: int, pet_field: str) -> int:
+    """Возвращает количество осенних питомцев определенного типа."""
+    cur.execute(
+        "SELECT qty FROM autumn_pets WHERE user_id = ? AND pet_field = ?",
+        (user_id, pet_field)
+    )
+    row = cur.fetchone()
+    return row["qty"] if row else 0
+
+
+def calculate_autumn_income_per_min(user_id: int) -> int:
+    """Вычисляет доход осенних питомцев в осенних монетах за минуту."""
+    autumn_pets = get_user_autumn_pets(user_id)
+    total_income = 0
+    for pet_data in autumn_pets:
+        pet_field = pet_data["pet_field"]
+        qty = pet_data["qty"]
+        # Ищем информацию о питомце в AUTUMN_PETS_CONFIG
+        for ap_field, ap_inc, _, _, _, _ in AUTUMN_PETS_CONFIG:
+            if ap_field == pet_field:
+                total_income += ap_inc * qty
+                break
+    return total_income
+
+
+def get_referral_count(user_id: int) -> int:
+    """Возвращает количество рефералов пользователя."""
+    cur.execute("SELECT referral_count FROM referrals WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    return row["referral_count"] if row else 0
+
+
+def increment_referral_count(user_id: int) -> None:
+    """Увеличивает счетчик рефералов."""
+    _execute(
+        """
+        INSERT INTO referrals (user_id, referral_count)
+        VALUES (?,1)
+        ON CONFLICT(user_id) DO UPDATE SET referral_count = referral_count + 1
+        """,
+        (user_id,),
     )
 
 
@@ -904,14 +1009,17 @@ async def auto_collect(context: ContextTypes.DEFAULT_TYPE) -> None:
         new_coins = min(user["coins"] + earned, MAX_INT)
         new_weekly = min(user["weekly_coins"] + earned, MAX_INT)
         
-        # Начисляем осенние монеты если событие активно
+        # Начисляем осенние монеты только с осенних питомцев
         autumn_earned = 0
         cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
         if cur.fetchone()["autumn_event_active"]:
-            autumn_earned = earned // 100  # 1% от обычного дохода
-            new_autumn = min(user["autumn_coins"] + autumn_earned, MAX_INT)
-            update_user(uid, coins=new_coins, weekly_coins=new_weekly, 
-                       autumn_coins=new_autumn, last_active=now)
+            autumn_earned = calculate_autumn_income_per_min(uid)  # Только с осенних питомцев
+            if autumn_earned > 0:
+                new_autumn = min(user["autumn_coins"] + autumn_earned, MAX_INT)
+                update_user(uid, coins=new_coins, weekly_coins=new_weekly, 
+                           autumn_coins=new_autumn, last_active=now)
+            else:
+                update_user(uid, coins=new_coins, weekly_coins=new_weekly, last_active=now)
         else:
             update_user(uid, coins=new_coins, weekly_coins=new_weekly, last_active=now)
         
@@ -1008,6 +1116,54 @@ def get_status(coins: int) -> str:
     return title
 
 
+def get_active_users_24h() -> int:
+    """Возвращает количество активных пользователей за 24 часа."""
+    now = int(time.time())
+    cur.execute("SELECT COUNT(*) as cnt FROM users WHERE last_active > ?", (now - 86400,))
+    return cur.fetchone()["cnt"]
+
+
+def get_total_farmers() -> int:
+    """Возвращает общее количество фермеров."""
+    cur.execute("SELECT COUNT(*) as cnt FROM users")
+    return cur.fetchone()["cnt"]
+
+
+def get_player_statistics() -> Dict[str, int]:
+    """Возвращает детальную статистику игроков для админа."""
+    now = int(time.time())
+    stats = {}
+    
+    # Общее количество игроков
+    cur.execute("SELECT COUNT(*) as cnt FROM users")
+    stats["total_players"] = cur.fetchone()["cnt"]
+    
+    # Активные за 24 часа
+    cur.execute("SELECT COUNT(*) as cnt FROM users WHERE last_active > ?", (now - 86400,))
+    stats["active_24h"] = cur.fetchone()["cnt"]
+    
+    # Активные за неделю
+    cur.execute("SELECT COUNT(*) as cnt FROM users WHERE last_active > ?", (now - 604800,))
+    stats["active_week"] = cur.fetchone()["cnt"]
+    
+    # Общее количество осенних монет в системе
+    cur.execute("SELECT SUM(autumn_coins) as total FROM users")
+    result = cur.fetchone()["total"]
+    stats["total_autumn_coins"] = result if result else 0
+    
+    # Общее количество обычных монет в системе
+    cur.execute("SELECT SUM(coins) as total FROM users")
+    result = cur.fetchone()["total"]
+    stats["total_coins"] = result if result else 0
+    
+    # Количество рефералов
+    cur.execute("SELECT SUM(referral_count) as total FROM referrals")
+    result = cur.fetchone()["total"]
+    stats["total_referrals"] = result if result else 0
+    
+    return stats
+
+
 # ----------------------------------------------------------------------
 #   Клавиатурные утилиты
 # ----------------------------------------------------------------------
@@ -1080,10 +1236,11 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🛒 Магазин", callback_data="shop"),
         InlineKeyboardButton("👨‍🌾 Фермеры", callback_data="farmers_shop"),
         InlineKeyboardButton("📊 Статус", callback_data="status"),
-        InlineKeyboardButton("💰 Получить монеты", callback_data="get_coins"),
+        InlineKeyboardButton("💰 Заработать монеты", callback_data="earn_coins"),
         InlineKeyboardButton("🎰 Казино", callback_data="casino_info"),
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
         InlineKeyboardButton("🍂 Осенний портал", callback_data="autumn_portal"),
+        InlineKeyboardButton("🍂 Осенний магазин", callback_data="autumn_shop"),
     ]
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
@@ -1212,6 +1369,7 @@ async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("📉 Продать животных", callback_data="sell_animal"),
         InlineKeyboardButton("🏗️ Улучшить базу", callback_data="upgrade_base"),
         InlineKeyboardButton("🏆 Топ фермеров", callback_data="top"),
+        InlineKeyboardButton("🍂 Осенний топ", callback_data="autumn_top"),
         InlineKeyboardButton("⬅️ Главное меню", callback_data="back"),
     ]
     kb = InlineKeyboardMarkup(chunk_buttons(btns, per_row=2))
@@ -1533,6 +1691,33 @@ async def top_farmers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ----------------------------------------------------------------------
+#   Осенний топ
+# ----------------------------------------------------------------------
+async def autumn_top_farmers(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Топ по осенним монетам."""
+    cur.execute(
+        "SELECT username, autumn_coins, user_id FROM users ORDER BY autumn_coins DESC LIMIT 10"
+    )
+    top10 = cur.fetchall()
+    txt = "🍂 Топ по осенним монетам\n━━━━━━━━━━━━\n"
+    if not top10:
+        txt += "Пока никто не собрал осенние монеты."
+    else:
+        for i, row in enumerate(top10, 1):
+            name = row["username"] or f"Пользователь {row['user_id']}"
+            txt += f"{i}. {name} — {format_num(row['autumn_coins'])}🍂\n"
+    
+    await edit_section(
+        query,
+        caption=txt,
+        image_key="top",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="farm")]]
+        ),
+    )
+
+
+# ----------------------------------------------------------------------
 #   Статус
 # ----------------------------------------------------------------------
 async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1555,11 +1740,7 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"💬 Репутация: {user['reputation']}\n"
         f"⚡ Титул: {get_status(user['coins'])}\n"
         f"🕷️ Паук‑секрет: {'Да' if user['secret_spider'] else 'Нет'}\n"
-        f"⏳ До конца сезона №{season_number}: {h}ч {m}м\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Активных за 24ч: {get_active_users_24h()}\n"
-        f"🌾 Всего фермеров: {get_total_farmers()}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
+        f"⏳ До конца сезона №{season_number}: {h}ч {m}м"
     )
     back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
     kb = InlineKeyboardMarkup([[back_btn]])
@@ -1572,61 +1753,164 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ----------------------------------------------------------------------
-#   Получить монеты (задания)
+#   Заработать монеты (рефералы)
 # ----------------------------------------------------------------------
-async def get_coins_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Показать пользователю доступные задания."""
+async def earn_coins_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показать пользователю меню заработка монет."""
+    uid = query.from_user.id
+    referral_count = get_referral_count(uid)
+    link = f"https://t.me/{context.bot.username}?start={uid}"
+    
+    text = (
+        f"💰 Заработать монеты\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤝 Ваших рефералов: {referral_count}\n"
+        f"🎁 За каждого: 1500🍂 осенних монет\n\n"
+        f"🔗 Ваша реферальная ссылка:\n{link}\n\n"
+        f"Отправьте эту ссылку друзьям и получайте награды!"
+    )
+    
     btns = [
-        InlineKeyboardButton("🤝 Пригласить друга", callback_data="task_referral"),
-        InlineKeyboardButton("🔹 Кликнуть (1‑5 монет)", callback_data="task_click"),
+        InlineKeyboardButton("📊 Мои рефералы", callback_data="my_referrals"),
+        InlineKeyboardButton("🎰 Рулетка", callback_data="roulette_menu"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back"),
     ]
     kb = InlineKeyboardMarkup(chunk_buttons(btns, per_row=2))
     await edit_section(
         query,
-        caption="💰 Получить монеты – выполните задания и получайте награды!",
+        caption=text,
         image_key="coins",
         reply_markup=kb,
     )
 
 
-async def task_referral(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def my_referrals(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает подробную информацию о рефералах."""
     uid = query.from_user.id
+    referral_count = get_referral_count(uid)
     link = f"https://t.me/{context.bot.username}?start={uid}"
+    
+    text = (
+        f"🤝 Мои рефералы\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Всего приглашено: {referral_count}\n"
+        f"💰 Заработано: {referral_count * 1500}🍂\n\n"
+        f"🔗 Ваша ссылка:\n{link}\n\n"
+        f"📋 Поделитесь ссылкой с друзьями!\n"
+        f"За каждого нового игрока вы получите 1500🍂 осенних монет."
+    )
+    
     await edit_section(
         query,
-        caption=(
-            f"🤝 Пригласите друга, отправив ему эту ссылку:\n{link}\n"
-            f"За каждого приглашённого вы получаете {format_num(500)}🪙."
-        ),
+        caption=text,
         image_key="coins",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Назад", callback_data="get_coins")]]
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="earn_coins")]]
         ),
     )
 
 
-async def task_click(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Клик – небольшая награда."""
+async def roulette_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Меню рулетки с выбором ставки."""
     uid = query.from_user.id
     user = get_user(uid)
-    reward = random.randint(1, 5)
-    update_user(
-        uid,
-        coins=user["coins"] + reward,
-        weekly_coins=user["weekly_coins"] + reward,
-        reputation=user["reputation"] + 1,
-        click_reward_last=int(time.time()),
+    
+    text = (
+        f"🎰 Рулетка\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Ваши монеты: {format_num(user['coins'])}🪙\n"
+        f"🍂 Осенние монеты: {format_num(user['autumn_coins'])}🍂\n\n"
+        f"🎯 Выберите ставку и валюту:\n"
+        f"🟢 30% шанс выигрыша (×2)\n"
+        f"🔴 70% шанс проигрыша"
     )
-    log_user_action(uid, f"Кликнул и получил {reward}🪙")
+    
+    btns = [
+        InlineKeyboardButton("100🪙", callback_data="roulette_coins_100"),
+        InlineKeyboardButton("500🪙", callback_data="roulette_coins_500"),
+        InlineKeyboardButton("1000🪙", callback_data="roulette_coins_1000"),
+        InlineKeyboardButton("100🍂", callback_data="roulette_autumn_100"),
+        InlineKeyboardButton("500🍂", callback_data="roulette_autumn_500"),
+        InlineKeyboardButton("1000🍂", callback_data="roulette_autumn_1000"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="earn_coins"),
+    ]
+    kb = InlineKeyboardMarkup(chunk_buttons(btns, per_row=3))
     await edit_section(
         query,
-        caption=f"✨ Вы получили {format_num(reward)}🪙!",
-        image_key="coins",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Назад", callback_data="get_coins")]]
-        ),
+        caption=text,
+        image_key="casino",
+        reply_markup=kb,
     )
+
+
+async def play_roulette(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Играет в рулетку."""
+    uid = query.from_user.id
+    user = get_user(uid)
+    data_parts = query.data.split("_")
+    currency = data_parts[1]  # coins или autumn
+    amount = int(data_parts[2])
+    
+    # Проверяем, достаточно ли средств
+    if currency == "coins":
+        if user["coins"] < amount:
+            await edit_section(
+                query,
+                caption=f"❌ Недостаточно монет! Нужно {amount}🪙",
+                image_key="casino",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Назад", callback_data="roulette_menu")]]
+                ),
+            )
+            return
+    else:  # autumn
+        if user["autumn_coins"] < amount:
+            await edit_section(
+                query,
+                caption=f"❌ Недостаточно осенних монет! Нужно {amount}🍂",
+                image_key="casino",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Назад", callback_data="roulette_menu")]]
+                ),
+            )
+            return
+    
+    # Играем
+    win = random.random() < 0.3  # 30% шанс выигрыша
+    
+    if win:
+        winnings = amount  # Выигрыш равен ставке (×2 от ставки)
+        if currency == "coins":
+            update_user(uid, coins=user["coins"] + winnings)
+            currency_symbol = "🪙"
+        else:
+            update_user(uid, autumn_coins=user["autumn_coins"] + winnings)
+            currency_symbol = "🍂"
+        
+        log_user_action(uid, f"Выиграл в рулетке {winnings}{currency_symbol}")
+        result_text = f"🎉 Поздравляем! Вы выиграли {amount}{currency_symbol}!"
+    else:
+        if currency == "coins":
+            update_user(uid, coins=user["coins"] - amount)
+            currency_symbol = "🪙"
+        else:
+            update_user(uid, autumn_coins=user["autumn_coins"] - amount)
+            currency_symbol = "🍂"
+        
+        log_user_action(uid, f"Проиграл в рулетке {amount}{currency_symbol}")
+        result_text = f"💔 Увы! Вы проиграли {amount}{currency_symbol}."
+    
+    await edit_section(
+        query,
+        caption=result_text,
+        image_key="casino",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎰 Играть еще", callback_data="roulette_menu")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="earn_coins")]
+        ]),
+    )
+
+
 
 
 # ----------------------------------------------------------------------
@@ -1920,6 +2204,141 @@ async def toggle_autumn_event(query, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 # ----------------------------------------------------------------------
+#   Осенний магазин
+# ----------------------------------------------------------------------
+async def autumn_shop_menu(query, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Отображает осенний магазин с осенними питомцами."""
+    uid = query.from_user.id
+    user = get_user(uid)
+    
+    # Проверяем, активно ли осеннее событие
+    cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
+    if not cur.fetchone()["autumn_event_active"]:
+        await edit_section(
+            query,
+            caption="❌ Осеннее событие не активно! Магазин закрыт.",
+            image_key="autumn",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+            ),
+        )
+        return
+    
+    items, total_pages = paginate_items(AUTUMN_PETS_CONFIG, page)
+    
+    text = (
+        f"🍂 Осенний магазин\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🍂 Осенние монеты: {format_num(user['autumn_coins'])}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Страница {page + 1}/{total_pages}\n\n"
+    )
+    
+    btns = []
+    for field, inc, emoji, name, price, desc in items:
+        btns.append(
+            InlineKeyboardButton(
+                f"{emoji} {name} ({format_num(price)}🍂)", 
+                callback_data=f"autumn_show_{field}"
+            )
+        )
+    
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⏪ Пред.", callback_data="autumn_shop_prev"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("След. ⏩", callback_data="autumn_shop_next"))
+    nav.append(InlineKeyboardButton("⬅️ Назад", callback_data="back"))
+    
+    kb = chunk_buttons(btns, per_row=2) + [nav]
+    await edit_section(
+        query,
+        caption=text,
+        image_key="autumn",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+    context.user_data["autumn_shop_page"] = page
+
+
+async def autumn_shop_navigation(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Навигация по осеннему магазину."""
+    data = query.data
+    cur_page = context.user_data.get("autumn_shop_page", 0)
+    if data == "autumn_shop_next":
+        await autumn_shop_menu(query, context, page=cur_page + 1)
+    elif data == "autumn_shop_prev":
+        await autumn_shop_menu(query, context, page=max(0, cur_page - 1))
+
+
+async def show_autumn_pet(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает информацию об осеннем питомце."""
+    field = query.data.split("_", 2)[2]  # autumn_show_<field>
+    rec = next((r for r in AUTUMN_PETS_CONFIG if r[0] == field), None)
+    if not rec:
+        await query.edit_message_caption(caption="❌ Питомец не найден.")
+        return
+    
+    _, inc, emoji, name, price, desc = rec
+    uid = query.from_user.id
+    user = get_user(uid)
+    
+    txt = (
+        f"{emoji} {name}\n"
+        f"Доход: {inc}🍂/мин (осенние монеты)\n"
+        f"Цена: {format_num(price)}🍂\n"
+        f"{desc}"
+    )
+    
+    if user["autumn_coins"] < price:
+        txt += f"\n❌ Недостаточно осенних монет!"
+        btn = InlineKeyboardButton("⬅️ Назад", callback_data="autumn_shop")
+        kb = InlineKeyboardMarkup([[btn]])
+    else:
+        btn = InlineKeyboardButton("🛒 Купить", callback_data=f"autumn_buy_{field}")
+        back_btn = InlineKeyboardButton("⬅️ Назад", callback_data="autumn_shop")
+        kb = InlineKeyboardMarkup([[btn], [back_btn]])
+    
+    await edit_section(query, caption=txt, image_key="autumn", reply_markup=kb)
+
+
+async def buy_autumn_pet(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Покупает осеннего питомца."""
+    field = query.data.split("_", 2)[2]  # autumn_buy_<field>
+    rec = next((r for r in AUTUMN_PETS_CONFIG if r[0] == field), None)
+    if not rec:
+        await query.edit_message_caption(caption="❌ Питомец не найден.")
+        return
+    
+    _, inc, emoji, name, price, desc = rec
+    uid = query.from_user.id
+    user = get_user(uid)
+    
+    if user["autumn_coins"] < price:
+        await edit_section(
+            query,
+            caption=f"❌ Недостаточно осенних монет! Нужно {format_num(price)}🍂",
+            image_key="autumn",
+        )
+        return
+    
+    # Покупаем питомца
+    current_qty = get_autumn_pet_qty(uid, field)
+    update_autumn_pet(uid, field, current_qty + 1)
+    update_user(uid, autumn_coins=user["autumn_coins"] - price)
+    
+    log_user_action(uid, f"Купил осеннего питомца {name} за {price}🍂")
+    
+    await edit_section(
+        query,
+        caption=f"✅ Вы купили {emoji} {name}!\nПотрачено {format_num(price)}🍂",
+        image_key="autumn",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ В осенний магазин", callback_data="autumn_shop")]]
+        ),
+    )
+
+
+# ----------------------------------------------------------------------
 #   Промокоды
 # ----------------------------------------------------------------------
 def add_promo(
@@ -2124,6 +2543,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("➕ Добавить монеты", callback_data="admin_add_coins"),
         InlineKeyboardButton("🧹 Обнулить X‑ферму", callback_data="admin_reset_xfarm"),
         InlineKeyboardButton("📜 Журнал действий", callback_data="admin_view_logs"),
+        InlineKeyboardButton("📊 Статистика игроков", callback_data="admin_player_stats"),
         InlineKeyboardButton("🎟️ Создать промокод", callback_data="admin_create_promo"),
         InlineKeyboardButton("🍂 Переключить осеннее событие", callback_data="admin_toggle_autumn"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back"),
@@ -2228,6 +2648,29 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             ),
         )
         return
+    if data == "admin_player_stats":
+        stats = get_player_statistics()
+        txt = (
+            f"📊 Статистика игроков\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 Всего игроков: {stats['total_players']}\n"
+            f"🔥 Активных за 24ч: {stats['active_24h']}\n"
+            f"📅 Активных за неделю: {stats['active_week']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Монет в системе: {format_num(stats['total_coins'])}🪙\n"
+            f"🍂 Осенних монет: {format_num(stats['total_autumn_coins'])}🍂\n"
+            f"🤝 Всего рефералов: {stats['total_referrals']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        await edit_section(
+            query,
+            caption=txt,
+            image_key="admin",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+            ),
+        )
+        return
     if data == "admin_create_promo":
         context.user_data["awaiting_create_promo"] = True
         await edit_section(
@@ -2300,19 +2743,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "top":
         await top_farmers(query, context)
         return
+    if data == "autumn_top":
+        await autumn_top_farmers(query, context)
+        return
     # ------------------- Статус -------------------
     if data == "status":
         await status_section(query, context)
         return
-    # ------------------- Получить монеты -------------------
-    if data == "get_coins":
-        await get_coins_menu(query, context)
+    # ------------------- Заработать монеты -------------------
+    if data == "earn_coins":
+        await earn_coins_menu(query, context)
         return
-    if data == "task_referral":
-        await task_referral(query, context)
+    if data == "my_referrals":
+        await my_referrals(query, context)
         return
-    if data == "task_click":
-        await task_click(query, context)
+    if data == "roulette_menu":
+        await roulette_menu(query, context)
+        return
+    if data.startswith("roulette_"):
+        await play_roulette(query, context)
         return
     # ------------------- Казино -------------------
     if data == "casino_info":
@@ -2351,8 +2800,20 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await farmer_buy_confirm(query, context)
         return
     # ------------------- Осеннее событие -------------------
-    if data == "autumn_event":
+    if data == "autumn_portal":
         await autumn_event_info(query, context)
+        return
+    if data == "autumn_shop":
+        await autumn_shop_menu(query, context, page=0)
+        return
+    if data in ("autumn_shop_next", "autumn_shop_prev"):
+        await autumn_shop_navigation(query, context)
+        return
+    if data.startswith("autumn_show_"):
+        await show_autumn_pet(query, context)
+        return
+    if data.startswith("autumn_buy_"):
+        await buy_autumn_pet(query, context)
         return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
@@ -2389,18 +2850,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ref_id = int(parts[1])
             if db_user["referred_by"] == 0 and ref_id != user.id:
                 update_user(user.id, referred_by=ref_id)
-                # награда рефереру
+                # награда рефереру - 1500 осенних монет
                 ref_user = get_user(ref_id)
                 update_user(
                     ref_id,
-                    coins=ref_user["coins"] + 500,
-                    weekly_coins=ref_user["weekly_coins"] + 500,
+                    autumn_coins=ref_user["autumn_coins"] + 1500,
                     reputation=ref_user["reputation"] + 1,
                 )
+                # Увеличиваем счетчик рефералов
+                increment_referral_count(ref_id)
                 try:
                     await context.bot.send_message(
                         ref_id,
-                        f"🤝 Вы получили {format_num(500)}🪙 за приглашение нового игрока!",
+                        f"🤝 Вы получили 1500🍂 осенних монет за приглашение нового игрока!",
                     )
                 except Exception:
                     pass
