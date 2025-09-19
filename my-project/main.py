@@ -1654,14 +1654,6 @@ async def render_shop(query, context: ContextTypes.DEFAULT_TYPE, page: int = 0) 
             f"🍎 Корм ({format_num(FOOD_PRICE)}🪙)", callback_data="buy_feed"
         )
     ]
-    cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
-    if cur.fetchone()["autumn_event_active"]:
-        btns.append(
-            InlineKeyboardButton(
-                f"🍂 Осенний корм ({format_num(AUTUMN_FOOD_PRICE)}🪙)",
-                callback_data="buy_autumn_feed",
-            )
-        )
     for field, _, emoji, name, _, price, _ in items:
         btns.append(
             InlineKeyboardButton(
@@ -1844,7 +1836,7 @@ async def buy_autumn_feed(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(
             query,
             caption=f"❌ Недостаточно монет. Нужно {format_num(AUTUMN_FOOD_PRICE)}🪙.",
-            image_key="shop",
+            image_key="autumn",
         )
         return
     update_user(
@@ -1858,10 +1850,48 @@ async def buy_autumn_feed(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     await edit_section(
         query,
         caption=f"✅ +1 осенний корм за {format_num(AUTUMN_FOOD_PRICE)}🪙.",
-        image_key="shop",
+        image_key="autumn",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ В магазин", callback_data="shop")]]
+            [[InlineKeyboardButton("⬅️ В портал", callback_data="autumn_portal")]]
         ),
+    )
+
+
+# ----------------------------------------------------------------------
+#   Осенний портал
+# ----------------------------------------------------------------------
+async def autumn_portal_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показать осенний портал с возможностью покупки осеннего корма."""
+    cur.execute("SELECT autumn_event_active FROM global_settings WHERE id = 1")
+    active = cur.fetchone()["autumn_event_active"]
+    
+    if not active:
+        text = (
+            "🍂 Осенний портал закрыт\n\n"
+            "Портал откроется, когда администратор активирует осеннее событие."
+        )
+        btns = [InlineKeyboardButton("⬅️ Назад", callback_data="back")]
+    else:
+        text = (
+            "🍂 Добро пожаловать в Осенний портал!\n\n"
+            "Здесь вы можете приобрести особый осенний корм, который удваивает доход на 1 час.\n"
+            f"Стоимость осеннего корма: {format_num(AUTUMN_FOOD_PRICE)}🪙"
+        )
+        btns = [
+            InlineKeyboardButton(
+                f"🍂 Купить осенний корм ({format_num(AUTUMN_FOOD_PRICE)}🪙)",
+                callback_data="buy_autumn_feed",
+            ),
+            InlineKeyboardButton("ℹ️ О событии", callback_data="autumn_event"),
+            InlineKeyboardButton("⬅️ Назад", callback_data="back"),
+        ]
+    
+    kb = InlineKeyboardMarkup(chunk_buttons(btns, per_row=1))
+    await edit_section(
+        query,
+        caption=text,
+        image_key="autumn",
+        reply_markup=kb,
     )
 
 
@@ -1875,7 +1905,7 @@ async def autumn_event_info(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         f"{status}\n\n"
         "🍂 Осеннее событие – временный бонус:\n"
-        f"• При покупке осеннего корма (в магазине) вы получаете двойной доход\n"
+        f"• При покупке осеннего корма (в осеннем портале) вы получаете двойной доход\n"
         f"  на 1 ч.\n"
         f"• Стоимость осеннего корма – {format_num(AUTUMN_FOOD_PRICE)}🪙.\n"
         "• Бонус активен только пока событие включено администратором."
@@ -1885,7 +1915,7 @@ async def autumn_event_info(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         caption=text,
         image_key="autumn",
         reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+            [[InlineKeyboardButton("⬅️ В портал", callback_data="autumn_portal")]]
         ),
     )
 
@@ -2351,6 +2381,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await farmer_buy_confirm(query, context)
         return
     # ------------------- Осеннее событие -------------------
+    if data == "autumn_portal":
+        await autumn_portal_menu(query, context)
+        return
     if data == "autumn_event":
         await autumn_event_info(query, context)
         return
