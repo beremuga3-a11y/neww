@@ -69,11 +69,13 @@ SECTION_IMAGES: Dict[str, str] = {
     "admin": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "logs": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "top": "https://i.postimg.cc/mg2rY7Y4/5355070803995131023.jpg",
+    "main": MAIN_MENU_IMG,
 }
 # ----------------------------------------------------------------------
 #   Картинки питомцев ← NEW
 # ----------------------------------------------------------------------
 ANIMAL_IMAGES: Dict[str, str] = {
+    # COMMON
     "chickens":   "https://i.postimg.cc/sXhBfbdg/137158096.jpg",
     "cows":       "https://i.postimg.cc/rsT0gP5b/cows.jpg",
     "pigs":       "https://i.postimg.cc/4yM8VbJw/pigs.jpg",
@@ -94,11 +96,147 @@ ANIMAL_IMAGES: Dict[str, str] = {
     "buffalo":    "https://i.postimg.cc/6tWfJ9K5/buffalo.jpg",
     "ferrets":    "https://i.postimg.cc/2jR6V8gH/ferrets.jpg",
     "otters":     "https://i.postimg.cc/0yH4pT7L/otters.jpg",
-    # … сюда же добавьте ссылки для всех остальных (rare, epic, mystic, secret, ultra и т.д.) …
-    # Пример:
+    # RARE
     "horses":     "https://i.postimg.cc/6qh5THc7/horses.jpg",
+    "sheep_rare": "https://i.postimg.cc/5tqV6c33/sheep.jpg",
+    "goats_rare": "https://i.postimg.cc/6tWfJ9K5/goats.jpg",
+    "alpacas_rare": "https://i.postimg.cc/3J6L2ZtV/alpacas.jpg",
+    "llamas_rare": "https://i.postimg.cc/6p3d3VbK/llamas.jpg",
+    "camels_rare": "https://i.postimg.cc/6z3WqRzK/camels.jpg",
+    "yaks_rare":  "https://i.postimg.cc/5N5Tzq9g/yak.jpg",
+    "buffalo_rare": "https://i.postimg.cc/6tWfJ9K5/buffalo.jpg",
+    "ostrich":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "emu":        "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "rhinoceros": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hippopotamus": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "giraffe":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "zebra":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "bison":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "moose":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "elk":        "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "reindeer":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "caribou":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "wild_boar":  "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    # EPIC
+    "dogs":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "cats":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "deer":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "foxes":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "wolves":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "bears":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "boars":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "raccoons":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "badgers":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "skunks":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "lynx":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "bobcat":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "jackal":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "coyote":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hyena":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "wild_dog":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "wild_cat":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "jackrabbit": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "ermine":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "marten":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    # MYSTIC
+    "lions":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "tigers":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "pandas":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "leopards":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "jaguars":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "cheetahs":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "koalas":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "kangaroos":  "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "platypus":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "eagles":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hawks":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "owls":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "falcons":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "griffin":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "phoenix":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "unicorn":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "pegasus":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "kraken":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "yeti":       "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "sasquatch":  "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    # SECRET
     "dragons":    "https://i.postimg.cc/6qh5THc7/dragons.jpg",
-    # Если ссылки нет – будет использовано изображение по умолчанию (MAIN_MENU_IMG)
+    "hydras":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "leviathans": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "golems":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "djinn":      "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "basilisks":  "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "chimeras":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "sirens":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "wraiths":    "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "specters":   "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "liches":     "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "archangels": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "demon_lords": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "celestials": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "voidbeasts": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "timekeepers": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "shadow_dragons": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "star_beasts": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "galactic_whales": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "secret_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    # ULTRA
+    "cosmic_behemoth": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "eternal_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "infinite_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "mythic_leviathan": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "celestial_golem": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "void_kraken": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "time_wraith": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "stellar_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "dimensional_titan": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "ultimate_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "galactic_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "stellar_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "quantum_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "void_wyrm": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "alpha_leviathan": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "beta_golem": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "sigma_kraken": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "omega_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "nebula_titan": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "chrono_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "aurora_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "radiant_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "celestial_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hyper_leviathan": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "quantum_golem": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "void_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "stellar_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "cosmic_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "chrono_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "aurora_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "radiant_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "nebula_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hyper_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "alpha_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "beta_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "sigma_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "omega_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "chrono_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "aurora_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "radiant_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "nebula_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "hyper_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "alpha_dragon": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "beta_phoenix": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "sigma_spider": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "omega_unicorn": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "galactic_overlord": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "quantum_nihility": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "void_eternity": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "time_anomaly": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "omniscient_being": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "Rick": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "Galac": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "Osminog": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "pes": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
+    "trrr": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
 }
 # ----------------------------------------------------------------------
 logging.basicConfig(
@@ -1035,6 +1173,7 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🎰 Казино", callback_data="casino_info"),
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
         InlineKeyboardButton("🍂 Осеннее событие", callback_data="autumn_event"),
+        InlineKeyboardButton("📈 Статистика бота", callback_data="bot_stats"),
     ]
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
@@ -1504,6 +1643,85 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ----------------------------------------------------------------------
+#   Статистика бота
+# ----------------------------------------------------------------------
+async def bot_stats_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает общую статистику бота."""
+    # Подсчитываем статистику
+    cur.execute("SELECT COUNT(*) as total FROM users")
+    total_users = cur.fetchone()["total"]
+    
+    cur.execute("SELECT SUM(coins) as total_coins FROM users")
+    total_coins = cur.fetchone()["total_coins"] or 0
+    
+    cur.execute("SELECT AVG(coins) as avg_coins FROM users")
+    avg_coins = int(cur.fetchone()["avg_coins"] or 0)
+    
+    # Самый богатый игрок
+    cur.execute("SELECT user_id, username, coins FROM users ORDER BY coins DESC LIMIT 1")
+    richest = cur.fetchone()
+    richest_text = "Нет данных"
+    if richest:
+        name = richest["username"] or f"ID {richest['user_id']}"
+        richest_text = f"{name} - {format_num(richest['coins'])}🪙"
+    
+    # Общее количество каждого типа животных
+    total_animals = 0
+    for field, *_ in ANIMAL_CONFIG:
+        cur.execute(f"SELECT SUM({field}) as total FROM users")
+        count = cur.fetchone()["total"] or 0
+        total_animals += count
+    
+    # Количество активных фермеров
+    cur.execute("SELECT COUNT(DISTINCT user_id) as active FROM farmers")
+    active_farmers = cur.fetchone()["active"]
+    
+    # Подсчитываем количество животных по классам
+    animal_stats = {"common": 0, "rare": 0, "epic": 0, "mystic": 0, "secret": 0, "ultra": 0}
+    for field, _, _, _, class_type, _, _ in ANIMAL_CONFIG:
+        cur.execute(f"SELECT SUM({field}) as total FROM users")
+        count = cur.fetchone()["total"] or 0
+        if class_type in animal_stats:
+            animal_stats[class_type] += count
+    
+    left, season_number = get_season_info()
+    h, r = divmod(left, 3600)
+    m = r // 60
+    
+    text = (
+        f"📈 Статистика бота 📈\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Всего игроков: {format_num(total_users)}\n"
+        f"💰 Всего монет: {format_num(total_coins)}🪙\n"
+        f"💰 Средние монеты: {format_num(avg_coins)}🪙\n"
+        f"🏆 Самый богатый: {richest_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🐾 Всего животных: {format_num(total_animals)}\n"
+        f"• Обычные: {format_num(animal_stats['common'])}\n"
+        f"• Редкие: {format_num(animal_stats['rare'])}\n"
+        f"• Эпические: {format_num(animal_stats['epic'])}\n"
+        f"• Мистические: {format_num(animal_stats['mystic'])}\n"
+        f"• Секретные: {format_num(animal_stats['secret'])}\n"
+        f"• Ультра: {format_num(animal_stats['ultra'])}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👨‍🌾 Активных фермеров: {format_num(active_farmers)}\n"
+        f"🏆 Сезон №{season_number}\n"
+        f"⏳ До конца сезона: {h}ч {m}м\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    
+    back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
+    kb = InlineKeyboardMarkup([[back_btn]])
+    
+    await edit_section(
+        query,
+        caption=text,
+        image_key="status",
+        reply_markup=kb,
+    )
+
+
+# ----------------------------------------------------------------------
 #   Получить монеты (задания)
 # ----------------------------------------------------------------------
 async def get_coins_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1648,13 +1866,23 @@ async def show_animal(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         txt += f"\n⚠️ Вы достигли лимита питомцев ({user['pet_limit']}).\n"
         txt += "Сначала улучшите базу или продайте часть животных."
         btn = InlineKeyboardButton("⬅️ Назад", callback_data="shop")
-        kb = InlineKeyboardMarkup([[btn]])
+        back_btn = InlineKeyboardButton("⬅️ Назад", callback_data="shop")
+        kb = InlineKeyboardMarkup([[back_btn]])
+    else:
+        # Кнопка «Купить» → покажет окно выбора количества
+        buy_btn = InlineKeyboardButton("🛒 Купить", callback_data=f"buy_qty_{field}")
+        back_btn = InlineKeyboardButton("⬅️ Назад", callback_data="shop")
+        kb = InlineKeyboardMarkup([[buy_btn], [back_btn]])
+    
+    # Проверяем есть ли изображение для этого питомца
+    image_url = ANIMAL_IMAGES.get(field)
+    if image_url:
+        await query.edit_message_media(
+            media=InputMediaPhoto(media=image_url, caption=txt),
+            reply_markup=kb,
+        )
+    else:
         await edit_section(query, caption=txt, image_key="shop", reply_markup=kb)
-        return
-    # Кнопка «Купить» → покажет окно выбора количества
-    btn = InlineKeyboardButton("🛒 Купить", callback_data=f"buy_qty_{field}")
-    kb = InlineKeyboardMarkup([[btn]])
-    await edit_section(query, caption=txt, image_key="shop", reply_markup=kb)
 
 
 async def buy_quantity(query, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2235,6 +2463,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # ------------------- Статус -------------------
     if data == "status":
         await status_section(query, context)
+        return
+    # ------------------- Статистика бота -------------------
+    if data == "bot_stats":
+        await bot_stats_section(query, context)
         return
     # ------------------- Получить монеты -------------------
     if data == "get_coins":
