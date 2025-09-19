@@ -388,14 +388,18 @@ def update_user(user_id: int, **kwargs: Any) -> None:
     _execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", tuple(vals))
 
 
-def get_user(user_id: int) -> sqlite3.Row:
+def get_user(user_id: int, username: str = None) -> sqlite3.Row:
     """Возвращает запись пользователя, создаёт её при необходимости."""
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
     if not row:
-        _execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        _execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
         cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
         row = cur.fetchone()
+    else:
+        # Обновляем username если он изменился
+        if username and row["username"] != username:
+            _execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
     # «Летучее» добавление новых колонок, если они вдруг появятся позже
     for field, *_ in ANIMAL_CONFIG:
         if field not in row.keys():
@@ -1049,7 +1053,7 @@ async def show_main_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False
 ) -> None:
     user = update.effective_user
-    db_user = get_user(user.id)
+    db_user = get_user(user.id, user.username)
     ticket_msg = (
         "\n🎟️ Ты получил 1 билет за ежедневный вход!"
         if give_daily_ticket(db_user)
@@ -1094,7 +1098,7 @@ async def about_section(query) -> None:
 # ----------------------------------------------------------------------
 async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = query.from_user.id
-    user = get_user(uid)
+    user = get_user(uid, query.from_user.username)
     now = time.time()
     # Список животных
     lines = []
@@ -2041,6 +2045,91 @@ async def farmer_buy_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ----------------------------------------------------------------------
+#   Журнал действий с пагинацией
+# ----------------------------------------------------------------------
+async def admin_view_logs(query, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Показывает журнал действий с пагинацией."""
+    if not is_admin(query.from_user.id):
+        await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    
+    items_per_page = 10
+    offset = page * items_per_page
+    
+    # Получаем общее количество записей
+    cur.execute("SELECT COUNT(*) as count FROM admin_logs")
+    total_count = cur.fetchone()["count"]
+    total_pages = (total_count - 1) // items_per_page + 1 if total_count > 0 else 1
+    
+    # Получаем записи для текущей страницы
+    cur.execute(
+        """
+        SELECT u.username, al.user_id, al.action, al.ts 
+        FROM admin_logs al
+        LEFT JOIN users u ON al.user_id = u.user_id
+        ORDER BY al.ts DESC 
+        LIMIT ? OFFSET ?
+        """,
+        (items_per_page, offset)
+    )
+    rows = cur.fetchall()
+    
+    if not rows and page == 0:
+        txt = "📜 Журнал действий пуст."
+    else:
+        txt = f"📜 Журнал действий (стр. {page + 1}/{total_pages})\n"
+        txt += f"━━━━━━━━━━━━━━━━━━━━\n"
+        for row in rows:
+            t = time.strftime("%d.%m %H:%M:%S", time.localtime(row["ts"]))
+            username = row["username"] or f"ID {row['user_id']}"
+            # Сокращаем слишком длинные действия
+            action = row["action"]
+            if len(action) > 50:
+                action = action[:47] + "..."
+            txt += f"🕐 {t}\n👤 {username}\n📝 {action}\n━━━━━━━━━━━━━━━━━━━━\n"
+    
+    # Кнопки навигации
+    nav_btns = []
+    if page > 0:
+        nav_btns.append(InlineKeyboardButton("⏪ Пред.", callback_data=f"logs_page_{page-1}"))
+    if page < total_pages - 1:
+        nav_btns.append(InlineKeyboardButton("След. ⏩", callback_data=f"logs_page_{page+1}"))
+    
+    kb_rows = []
+    if nav_btns:
+        kb_rows.append(nav_btns)
+    kb_rows.append([
+        InlineKeyboardButton("🧹 Очистить журнал", callback_data="admin_clear_logs"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="admin")
+    ])
+    
+    await edit_section(
+        query,
+        caption=txt,
+        image_key="logs",
+        reply_markup=InlineKeyboardMarkup(kb_rows)
+    )
+    context.user_data["logs_page"] = page
+
+
+async def admin_clear_logs(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Очищает журнал действий."""
+    if not is_admin(query.from_user.id):
+        await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
+        return
+    
+    _execute("DELETE FROM admin_logs")
+    await edit_section(
+        query, 
+        caption="✅ Журнал действий очищен.",
+        image_key="logs",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+        )
+    )
+
+
+# ----------------------------------------------------------------------
 #   Админ‑панель
 # ----------------------------------------------------------------------
 async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2140,25 +2229,7 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(query, caption="✅ X‑ферма уже отсутствует.", image_key="admin")
         return
     if data == "admin_view_logs":
-        cur.execute(
-            "SELECT user_id, action, ts FROM admin_logs ORDER BY ts DESC LIMIT 20"
-        )
-        rows = cur.fetchall()
-        if not rows:
-            txt = "📜 Журнал пуст."
-        else:
-            txt = "📜 Последние действия игроков:\n"
-            for row in rows:
-                t = time.strftime("%d.%m %H:%M", time.localtime(row["ts"]))
-                txt += f"[{t}] ID {row['user_id']}: {row['action']}\n"
-        await edit_section(
-            query,
-            caption=txt,
-            image_key="logs",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
-            ),
-        )
+        await admin_view_logs(query, context, page=0)
         return
     if data == "admin_create_promo":
         context.user_data["awaiting_create_promo"] = True
@@ -2178,6 +2249,9 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
+        return
+    if data == "admin_clear_logs":
+        await admin_clear_logs(query, context)
         return
     await edit_section(query, caption="❓ Неизвестная команда.", image_key="admin")
 
@@ -2299,6 +2373,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if data.startswith("admin_"):
         await admin_actions(query, context)
+        return
+    # ------------------- Навигация по журналу -------------------
+    if data.startswith("logs_page_"):
+        page = int(data.split("_")[-1])
+        await admin_view_logs(query, context, page=page)
         return
     # ------------------- Неизвестная команда -------------------
     await query.edit_message_caption(caption="❓ Неизвестная команда.")
@@ -2618,7 +2697,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # ------------------- Трейд (упрощённый пример) -------------------
     if txt.lower().startswith("/trade"):
-        await start_trade(query, context)   # функция start_trade реализована ниже
+        await start_trade(update, context)   # функция start_trade реализована ниже
+        return
+
+    # ------------------- Обработка состояния трейда -------------------
+    if context.user_data.get("trade_state"):
+        if txt.lower() == "отмена":
+            context.user_data.pop("trade_state", None)
+            await update.message.reply_text("❌ Трейд отменён.")
+            return
+        await handle_trade_step(update, context)
         return
 
     # ------------------- Любой другой текст -------------------
@@ -2629,16 +2717,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ----------------------------------------------------------------------
 #   Трейд (упрощённый пример)
 # ----------------------------------------------------------------------
-async def start_trade(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Запускает простую схему трейда – запрос получателя."""
     context.user_data["trade_state"] = {"step": 1}
-    await edit_section(
-        query,
-        caption="🤝 Трейд: введите ID получателя (user_id).",
-        image_key="farm",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
-        ),
+    await update.message.reply_text(
+        "🤝 Трейд: введите ID получателя (user_id).\n"
+        "Для отмены напишите 'отмена' или используйте /start"
     )
 
 
