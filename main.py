@@ -286,7 +286,8 @@ def init_db() -> None:
             subscribe_claimed INTEGER DEFAULT 0,
             chat_claimed INTEGER DEFAULT 0,
             click_reward_last INTEGER DEFAULT 0,
-            referred_by INTEGER DEFAULT 0
+            referred_by INTEGER DEFAULT 0,
+            last_activity INTEGER DEFAULT 0
         );
         """
     )
@@ -432,6 +433,7 @@ def ensure_user_columns() -> None:
         "chat_claimed",
         "click_reward_last",
         "referred_by",
+        "last_activity",
     }
     for col in needed:
         if col not in existing:
@@ -542,6 +544,14 @@ def get_user(user_id: int) -> sqlite3.Row:
             row = cur.fetchone()
             break
     return row
+
+
+def update_last_activity(user_id: int) -> None:
+    """Обновляет время последней активности пользователя."""
+    _execute(
+        "UPDATE users SET last_activity = ? WHERE user_id = ?",
+        (int(time.time()), user_id)
+    )
 
 
 def set_pet_last_fed(user_id: int, pet_field: str, timestamp: int) -> None:
@@ -1173,7 +1183,6 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🎰 Казино", callback_data="casino_info"),
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
         InlineKeyboardButton("🍂 Осеннее событие", callback_data="autumn_event"),
-        InlineKeyboardButton("📈 Статистика бота", callback_data="bot_stats"),
     ]
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
@@ -1657,6 +1666,14 @@ async def bot_stats_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     cur.execute("SELECT AVG(coins) as avg_coins FROM users")
     avg_coins = int(cur.fetchone()["avg_coins"] or 0)
     
+    # Активные пользователи за последние 24 часа
+    twenty_four_hours_ago = int(time.time()) - 86400
+    cur.execute(
+        "SELECT COUNT(*) as active_24h FROM users WHERE last_activity > ?",
+        (twenty_four_hours_ago,)
+    )
+    active_24h = cur.fetchone()["active_24h"]
+    
     # Самый богатый игрок
     cur.execute("SELECT user_id, username, coins FROM users ORDER BY coins DESC LIMIT 1")
     richest = cur.fetchone()
@@ -1692,6 +1709,7 @@ async def bot_stats_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"📈 Статистика бота 📈\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"👥 Всего игроков: {format_num(total_users)}\n"
+        f"✅ Активных за 24ч: {format_num(active_24h)}\n"
         f"💰 Всего монет: {format_num(total_coins)}🪙\n"
         f"💰 Средние монеты: {format_num(avg_coins)}🪙\n"
         f"🏆 Самый богатый: {richest_text}\n"
@@ -1710,7 +1728,7 @@ async def bot_stats_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     
-    back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
+    back_btn = InlineKeyboardButton("⬅️ Админ", callback_data="admin")
     kb = InlineKeyboardMarkup([[back_btn]])
     
     await edit_section(
@@ -2276,6 +2294,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         await edit_section(query, caption="❌ Доступ запрещён.", image_key="admin")
         return
     btns = [
+        InlineKeyboardButton("📈 Статистика бота", callback_data="bot_stats"),
         InlineKeyboardButton("🔄 Сброс топа", callback_data="admin_reset_top"),
         InlineKeyboardButton("🔁 Сброс всех аккаунтов", callback_data="admin_reset_all"),
         InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
@@ -2420,6 +2439,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         pass
     data = query.data
+    
+    # Обновляем последнюю активность пользователя
+    if query.from_user:
+        update_last_activity(query.from_user.id)
     # ------------------- Универсальная «Назад» -------------------
     if data == "back":
         await show_main_menu(update, context, edit=True)
@@ -2544,6 +2567,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     txt = update.message.text if update.message else ""
     user = update.effective_user
     db_user = get_user(user.id)
+    
+    # Обновляем последнюю активность пользователя
+    update_last_activity(user.id)
+    
     # Проверяем, не наступил ли новый сезон
     check_and_reset_season()
     # Реферальный параметр: /start <ref_id>
@@ -2578,6 +2605,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Обрабатывает все текстовые сообщения, не являющиеся командами."""
     user = update.effective_user
     txt = update.message.text if update.message else ""
+    
+    # Обновляем последнюю активность пользователя
+    if user:
+        update_last_activity(user.id)
 
     # ------------------- Рассылка (админ) -------------------
     if context.user_data.get("awaiting_broadcast"):
