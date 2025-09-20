@@ -1556,9 +1556,6 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"⚡ Титул: {get_status(user['coins'])}\n"
         f"🕷️ Паук‑секрет: {'Да' if user['secret_spider'] else 'Нет'}\n"
         f"⏳ До конца сезона №{season_number}: {h}ч {m}м\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Активных за 24ч: {get_active_users_24h()}\n"
-        f"🌾 Всего фермеров: {get_total_farmers()}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
@@ -2215,10 +2212,11 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not rows:
             txt = "📜 Журнал пуст."
         else:
-            txt = "📜 Последние действия игроков:\n"
+            txt = "📜 Последние действия игроков:\n━━━━━━━━━━━━━━━━━━━━\n"
             for row in rows:
                 t = time.strftime("%d.%m %H:%M", time.localtime(row["ts"]))
                 txt += f"[{t}] ID {row['user_id']}: {row['action']}\n"
+            txt += "━━━━━━━━━━━━━━━━━━━━"
         await edit_section(
             query,
             caption=txt,
