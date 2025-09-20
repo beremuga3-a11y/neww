@@ -1052,6 +1052,20 @@ def get_season_info() -> Tuple[int, int]:
     return left, row["season_number"]
 
 
+def get_active_users_24h() -> int:
+    """Возвращает количество активных пользователей за последние 24 часа."""
+    now = int(time.time())
+    day_ago = now - 86400
+    cur.execute("SELECT COUNT(*) FROM users WHERE last_active > ?", (day_ago,))
+    return cur.fetchone()[0]
+
+
+def get_total_farmers() -> int:
+    """Возвращает общее количество фермеров."""
+    cur.execute("SELECT COUNT(*) FROM users")
+    return cur.fetchone()[0]
+
+
 # ----------------------------------------------------------------------
 #   Общая функция редактирования разделов с картинкой ← NEW
 # ----------------------------------------------------------------------
@@ -1147,19 +1161,8 @@ async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     now = time.time()
     # Список животных
     lines = []
-    # Сначала показываем осенних питомцев (если есть)
-    autumn_pets = get_user_autumn_pets(uid)
-    for pet_data in autumn_pets:
-        pet_field = pet_data["pet_field"]
-        qty = pet_data["qty"]
-        # Ищем информацию о питомце в AUTUMN_PETS_CONFIG
-        for ap_field, ap_inc, ap_emoji, ap_name, ap_price, ap_desc in AUTUMN_PETS_CONFIG:
-            if ap_field == pet_field:
-                inc_total = ap_inc * qty
-                lines.append(
-                    f"{ap_emoji} {ap_name} (🍂): {qty} (+{format_num(inc_total)}🪙/мин)"
-                )
-                break
+    # Осенние питомцы пока не реализованы
+    # autumn_pets = get_user_autumn_pets(uid)
     
     # Затем обычные питомцы
     for field, inc, emoji, name, *_ in ANIMAL_CONFIG:
@@ -2354,6 +2357,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "autumn_event":
         await autumn_event_info(query, context)
         return
+    if data == "autumn_portal":
+        await autumn_event_info(query, context)
+        return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
         return
@@ -2686,7 +2692,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # ------------------- Трейд (упрощённый пример) -------------------
     if txt.lower().startswith("/trade"):
-        await start_trade(query, context)   # функция start_trade реализована ниже
+        context.user_data["trade_state"] = {"step": 1}
+        await update.message.reply_text("🤝 Трейд: введите ID получателя (user_id).")
+        return
+
+    # ------------------- Обработка трейда -------------------
+    if context.user_data.get("trade_state"):
+        await handle_trade_step(update, context)
         return
 
     # ------------------- Любой другой текст -------------------
@@ -2697,19 +2709,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ----------------------------------------------------------------------
 #   Трейд (упрощённый пример)
 # ----------------------------------------------------------------------
-async def start_trade(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Запускает простую схему трейда – запрос получателя."""
-    context.user_data["trade_state"] = {"step": 1}
-    await edit_section(
-        query,
-        caption="🤝 Трейд: введите ID получателя (user_id).",
-        image_key="farm",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
-        ),
-    )
-
-
 async def handle_trade_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает ввод данных в процессе трейда."""
     txt = update.message.text.strip()
@@ -2873,7 +2872,7 @@ def main() -> None:
         log.info("Миграция завершена, колонки добавлены.")
         return
     add_admins()
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).job_queue(None).build()
     # Основные команды
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("pets", pets_command))
@@ -2904,13 +2903,13 @@ def main() -> None:
     # Текстовые сообщения
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     # Фоновые задачи
-    app.job_queue.run_repeating(auto_collect, interval=60, first=10)          # доход каждые 1 мин
-    app.job_queue.run_repeating(check_hunger, interval=300, first=30)        # проверка голода
-    app.job_queue.run_repeating(
-        lambda _: check_and_reset_season(),
-        interval=86400,
-        first=5,
-    )                  # проверка сезона
+    # app.job_queue.run_repeating(auto_collect, interval=60, first=10)          # доход каждые 1 мин
+    # app.job_queue.run_repeating(check_hunger, interval=300, first=30)        # проверка голода
+    # app.job_queue.run_repeating(
+    #     lambda _: check_and_reset_season(),
+    #     interval=86400,
+    #     first=5,
+    # )                  # проверка сезона
     app.run_polling()
 
 
