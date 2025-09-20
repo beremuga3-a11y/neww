@@ -843,7 +843,7 @@ FARMER_IMAGES: Dict[str, str] = {
 }
 def get_farmer(name: str) -> Tuple[str, int, int, str] | None:
     for rec in FARMER_CONFIG:
-        if rec[0].lower() == name.lower():
+        if rec[0] == name:
             return rec
     return None
 
@@ -1147,21 +1147,7 @@ async def farm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     now = time.time()
     # Список животных
     lines = []
-    # Сначала показываем осенних питомцев (если есть)
-    autumn_pets = get_user_autumn_pets(uid)
-    for pet_data in autumn_pets:
-        pet_field = pet_data["pet_field"]
-        qty = pet_data["qty"]
-        # Ищем информацию о питомце в AUTUMN_PETS_CONFIG
-        for ap_field, ap_inc, ap_emoji, ap_name, ap_price, ap_desc in AUTUMN_PETS_CONFIG:
-            if ap_field == pet_field:
-                inc_total = ap_inc * qty
-                lines.append(
-                    f"{ap_emoji} {ap_name} (🍂): {qty} (+{format_num(inc_total)}🪙/мин)"
-                )
-                break
-    
-    # Затем обычные питомцы
+    # Обычные питомцы
     for field, inc, emoji, name, *_ in ANIMAL_CONFIG:
         cnt = user[field]
         if cnt == 0:
@@ -1557,8 +1543,8 @@ async def status_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"🕷️ Паук‑секрет: {'Да' if user['secret_spider'] else 'Нет'}\n"
         f"⏳ До конца сезона №{season_number}: {h}ч {m}м\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Активных за 24ч: {get_active_users_24h()}\n"
-        f"🌾 Всего фермеров: {get_total_farmers()}\n"
+        f"📊 Активных за 24ч: {len([row for row in cur.execute('SELECT user_id FROM users WHERE last_active > ?', (int(time.time()) - 86400,))])}\n"
+        f"🌾 Всего фермеров: {len([row for row in cur.execute('SELECT user_id FROM farmers')])}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     back_btn = InlineKeyboardButton("⬅️ Главное меню", callback_data="back")
@@ -2686,7 +2672,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # ------------------- Трейд (упрощённый пример) -------------------
     if txt.lower().startswith("/trade"):
-        await start_trade(query, context)   # функция start_trade реализована ниже
+        # Создаем фиктивный query для start_trade
+        class FakeQuery:
+            def __init__(self, update):
+                self.from_user = update.effective_user
+        fake_query = FakeQuery(update)
+        await start_trade(fake_query, context)
         return
 
     # ------------------- Любой другой текст -------------------
