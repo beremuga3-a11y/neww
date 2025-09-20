@@ -49,6 +49,18 @@ CHAT_ID = -4966660960
 CHAT_LINK = "https://t.me/+tjqmdwVMjtYxMTU6"
 CHANNEL_LINK = "https://t.me/spiderfarminfo"
 
+# Галактическое событие
+GALACTIC_STORM_DURATION = 3 * 24 * 3600  # 3 дня в секундах
+GALACTIC_ENERGY_COOLDOWN = 3 * 3600      # 3 часа между попытками
+GALACTIC_STORM_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
+
+# Осенние питомцы (временные)
+AUTUMN_PETS_CONFIG: List[Tuple[str, int, str, str, int, str]] = [
+    ("autumn_chicken", 5, "🍂🐔", "Осенняя курица", 1000, "Особенная курица с осенними листьями"),
+    ("autumn_cow", 10, "🍂🐄", "Осенняя корова", 2000, "Корова, питающаяся осенними яблоками"),
+    ("autumn_pig", 15, "🍂🐖", "Осенний поросёнок", 3000, "Поросёнок, любящий осенние желуди"),
+]
+
 # Картинки
 MAIN_MENU_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
 AUTUMN_EVENT_IMG = "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg"
@@ -67,6 +79,7 @@ SECTION_IMAGES: Dict[str, str] = {
     "casino": "https://i.postimg.cc/zvZBKMj2/5355070803995131009.jpg",
     "promo": "https://i.postimg.cc/kXCG50DB/5355070803995131030.jpg",
     "autumn": AUTUMN_EVENT_IMG,
+    "galactic": GALACTIC_STORM_IMG,
     "admin": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "logs": "https://i.postimg.cc/fb1TQF6W/5355070803995131046.jpg",
     "top": "https://i.postimg.cc/mg2rY7Y4/5355070803995131023.jpg",
@@ -270,6 +283,37 @@ def init_db() -> None:
         );
         """
     )
+    # ---------- galactic_storm ----------
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS galactic_storm (
+            id INTEGER PRIMARY KEY,
+            event_active INTEGER DEFAULT 0,
+            event_start INTEGER DEFAULT 0,
+            event_end INTEGER DEFAULT 0
+        );
+        """
+    )
+    # ---------- galactic_storm_users ----------
+    _execute(
+        """
+        CREATE TABLE IF NOT EXISTS galactic_storm_users (
+            user_id INTEGER PRIMARY KEY,
+            last_energy_catch INTEGER DEFAULT 0,
+            total_catches INTEGER DEFAULT 0,
+            cosmic_pets INTEGER DEFAULT 0
+        );
+        """
+    )
+    # создаём строку id=1 для галактического события, если её нет
+    cur.execute("SELECT 1 FROM galactic_storm WHERE id = 1")
+    if cur.fetchone() is None:
+        _execute(
+            """
+            INSERT INTO galactic_storm (id, event_active, event_start, event_end)
+            VALUES (1, 0, 0, 0)
+            """
+        )
     conn.commit()
 
 
@@ -313,6 +357,11 @@ def ensure_animal_columns() -> None:
     for field, *_ in ANIMAL_CONFIG:
         if field not in existing:
             log.info("Adding animal column %s", field)
+            _execute(f"ALTER TABLE users ADD COLUMN {field} INTEGER DEFAULT 0")
+    # Добавляем колонки для осенних питомцев
+    for field, *_ in AUTUMN_PETS_CONFIG:
+        if field not in existing:
+            log.info("Adding autumn pet column %s", field)
             _execute(f"ALTER TABLE users ADD COLUMN {field} INTEGER DEFAULT 0")
 
 
@@ -408,6 +457,13 @@ def get_user(user_id: int) -> sqlite3.Row:
             cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
             row = cur.fetchone()
             break
+    # Также добавляем колонки для осенних питомцев
+    for field, *_ in AUTUMN_PETS_CONFIG:
+        if field not in row.keys():
+            _execute(f"ALTER TABLE users ADD COLUMN {field} INTEGER DEFAULT 0")
+            cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            row = cur.fetchone()
+            break
     return row
 
 
@@ -436,6 +492,39 @@ def delete_pet_last_fed(user_id: int, pet_field: str) -> None:
         "DELETE FROM pet_last_fed WHERE user_id = ? AND pet_field = ?",
         (user_id, pet_field),
     )
+
+
+def get_user_autumn_pets(user_id: int) -> List[Dict[str, Any]]:
+    """Получает осенних питомцев пользователя."""
+    user = get_user(user_id)
+    autumn_pets = []
+    for field, inc, emoji, name, price, desc in AUTUMN_PETS_CONFIG:
+        if field in user and user[field] > 0:
+            autumn_pets.append({
+                "pet_field": field,
+                "qty": user[field],
+                "inc": inc,
+                "emoji": emoji,
+                "name": name,
+                "price": price,
+                "desc": desc
+            })
+    return autumn_pets
+
+
+def get_active_users_24h() -> int:
+    """Возвращает количество активных пользователей за последние 24 часа."""
+    now = int(time.time())
+    day_ago = now - 86400
+    cur.execute("SELECT COUNT(*) as count FROM users WHERE last_active > ?", (day_ago,))
+    return cur.fetchone()["count"]
+
+
+def get_total_farmers() -> int:
+    """Возвращает общее количество фермеров."""
+    cur.execute("SELECT SUM(qty) as total FROM farmers")
+    result = cur.fetchone()["total"]
+    return result if result else 0
 
 
 # ----------------------------------------------------------------------
@@ -1053,6 +1142,123 @@ def get_season_info() -> Tuple[int, int]:
 
 
 # ----------------------------------------------------------------------
+#   Галактическое событие
+# ----------------------------------------------------------------------
+def is_galactic_storm_active() -> bool:
+    """Проверяет, активно ли галактическое событие."""
+    cur.execute("SELECT event_active, event_end FROM galactic_storm WHERE id = 1")
+    row = cur.fetchone()
+    if not row:
+        return False
+    now = int(time.time())
+    return bool(row["event_active"]) and now < row["event_end"]
+
+
+def start_galactic_storm() -> None:
+    """Запускает галактическое событие."""
+    now = int(time.time())
+    end_time = now + GALACTIC_STORM_DURATION
+    _execute(
+        "UPDATE galactic_storm SET event_active = 1, event_start = ?, event_end = ? WHERE id = 1",
+        (now, end_time),
+    )
+
+
+def stop_galactic_storm() -> None:
+    """Останавливает галактическое событие."""
+    _execute("UPDATE galactic_storm SET event_active = 0 WHERE id = 1")
+
+
+def get_galactic_storm_info() -> Tuple[int, int]:
+    """Возвращает (секунд до конца события, секунд до следующей попытки)."""
+    cur.execute("SELECT event_end FROM galactic_storm WHERE id = 1")
+    row = cur.fetchone()
+    if not row:
+        return 0, 0
+    now = int(time.time())
+    time_left = max(0, row["event_end"] - now)
+    return time_left, 0
+
+
+def get_galactic_user_data(user_id: int) -> sqlite3.Row:
+    """Получает данные пользователя для галактического события."""
+    cur.execute("SELECT * FROM galactic_storm_users WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        _execute(
+            "INSERT INTO galactic_storm_users (user_id) VALUES (?)",
+            (user_id,),
+        )
+        cur.execute("SELECT * FROM galactic_storm_users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+    return row
+
+
+def can_catch_galactic_energy(user_id: int) -> Tuple[bool, int]:
+    """Проверяет, может ли пользователь поймать космическую энергию."""
+    if not is_galactic_storm_active():
+        return False, 0
+    user_data = get_galactic_user_data(user_id)
+    now = int(time.time())
+    time_since_last = now - user_data["last_energy_catch"]
+    cooldown_left = max(0, GALACTIC_ENERGY_COOLDOWN - time_since_last)
+    return cooldown_left == 0, cooldown_left
+
+
+def catch_galactic_energy(user_id: int) -> Dict[str, Any]:
+    """Обрабатывает попытку поймать космическую энергию."""
+    can_catch, cooldown = can_catch_galactic_energy(user_id)
+    if not can_catch:
+        return {"success": False, "cooldown": cooldown}
+    
+    now = int(time.time())
+    user_data = get_galactic_user_data(user_id)
+    
+    # Обновляем время последней попытки
+    _execute(
+        "UPDATE galactic_storm_users SET last_energy_catch = ?, total_catches = total_catches + 1 WHERE user_id = ?",
+        (now, user_id),
+    )
+    
+    # Определяем награду
+    reward_type = random.choices(
+        ["coins", "income_boost", "cosmic_pet"],
+        weights=[70, 25, 5],  # 70% монеты, 25% буст дохода, 5% космический питомец
+        k=1
+    )[0]
+    
+    result = {"success": True, "type": reward_type}
+    
+    if reward_type == "coins":
+        # Случайная сумма монет от 1000 до 10000
+        coins = random.randint(1000, 10000)
+        user = get_user(user_id)
+        new_coins = min(user["coins"] + coins, MAX_INT)
+        update_user(user_id, coins=new_coins, weekly_coins=user["weekly_coins"] + coins)
+        result["amount"] = coins
+        log_user_action(user_id, f"Поймал космическую энергию: +{coins}🪙")
+        
+    elif reward_type == "income_boost":
+        # +10% к доходу на 1 час
+        user = get_user(user_id)
+        boost_end = now + 3600  # 1 час
+        update_user(user_id, feed_bonus_end=boost_end)
+        result["duration"] = 3600
+        log_user_action(user_id, "Получил галактический буст дохода +10% на 1ч")
+        
+    elif reward_type == "cosmic_pet":
+        # Космический питомец
+        _execute(
+            "UPDATE galactic_storm_users SET cosmic_pets = cosmic_pets + 1 WHERE user_id = ?",
+            (user_id,),
+        )
+        result["pet_name"] = "Космический питомец"
+        log_user_action(user_id, "Получил космического питомца!")
+    
+    return result
+
+
+# ----------------------------------------------------------------------
 #   Общая функция редактирования разделов с картинкой ← NEW
 # ----------------------------------------------------------------------
 async def edit_section(
@@ -1085,6 +1291,9 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🎟️ Промокоды", callback_data="promo"),
         InlineKeyboardButton("🍂 Осенний портал", callback_data="autumn_portal"),
     ]
+    # Добавляем кнопку галактического события только если оно активно
+    if is_galactic_storm_active():
+        other.append(InlineKeyboardButton("🌌 Галактический шторм", callback_data="galactic_storm"))
     rows.extend(chunk_buttons(other, per_row=3))
     if is_admin(user_id):
         rows.append([InlineKeyboardButton("🔥 Админ", callback_data="admin")])
@@ -1920,6 +2129,166 @@ async def toggle_autumn_event(query, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 # ----------------------------------------------------------------------
+#   Галактическое событие - обработчики
+# ----------------------------------------------------------------------
+async def galactic_storm_section(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает информацию о галактическом событии."""
+    if not is_galactic_storm_active():
+        await edit_section(
+            query,
+            caption="🌌 Галактический шторм не активен.\nСобытие будет запущено администратором.",
+            image_key="galactic",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="back")]]
+            ),
+        )
+        return
+    
+    uid = query.from_user.id
+    user_data = get_galactic_user_data(uid)
+    can_catch, cooldown = can_catch_galactic_energy(uid)
+    time_left, _ = get_galactic_storm_info()
+    
+    # Форматируем время
+    h_left, r_left = divmod(time_left, 3600)
+    m_left = r_left // 60
+    
+    if can_catch:
+        button_text = "⚡ Поймать космическую энергию"
+        button_data = "galactic_catch_energy"
+        status_text = "✅ Готов к ловле энергии!"
+    else:
+        h_cooldown, r_cooldown = divmod(cooldown, 3600)
+        m_cooldown = r_cooldown // 60
+        button_text = f"⏳ До следующей попытки: {h_cooldown}ч {m_cooldown}м"
+        button_data = "galactic_wait"
+        status_text = "⏳ Ожидание перезарядки..."
+    
+    text = (
+        f"🌌 Галактический шторм ⚡\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪐 Космическая энергия бушует в галактике!\n"
+        f"⏰ До конца события: {h_left}ч {m_left}м\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 Ваша статистика:\n"
+        f"🎯 Всего попыток: {user_data['total_catches']}\n"
+        f"🪐 Космических питомцев: {user_data['cosmic_pets']}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{status_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💫 Возможные награды:\n"
+        f"💰 Случайные монеты (70%)\n"
+        f"⚡ +10% к доходу на 1ч (25%)\n"
+        f"🪐 Космический питомец (5%)"
+    )
+    
+    btns = []
+    if can_catch:
+        btns.append(InlineKeyboardButton(button_text, callback_data=button_data))
+    else:
+        btns.append(InlineKeyboardButton(button_text, callback_data=button_data))
+    btns.append(InlineKeyboardButton("⬅️ Назад", callback_data="back"))
+    
+    kb = InlineKeyboardMarkup([btns])
+    await edit_section(
+        query,
+        caption=text,
+        image_key="galactic",
+        reply_markup=kb,
+    )
+
+
+async def galactic_catch_energy(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает попытку поймать космическую энергию."""
+    uid = query.from_user.id
+    result = catch_galactic_energy(uid)
+    
+    if not result["success"]:
+        h, r = divmod(result["cooldown"], 3600)
+        m = r // 60
+        await edit_section(
+            query,
+            caption=f"⏳ До следующей попытки: {h}ч {m}м",
+            image_key="galactic",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="galactic_storm")]]
+            ),
+        )
+        return
+    
+    # Формируем сообщение о награде
+    if result["type"] == "coins":
+        text = (
+            f"⚡ Космическая энергия поймана! ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Получено: {format_num(result['amount'])}🪙\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌌 Энергия галактики наполнила ваш кошелёк!"
+        )
+    elif result["type"] == "income_boost":
+        text = (
+            f"⚡ Космическая энергия поймана! ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 Получен буст дохода: +10%\n"
+            f"⏰ Длительность: 1 час\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌌 Галактическая энергия усиливает вашу ферму!"
+        )
+    elif result["type"] == "cosmic_pet":
+        text = (
+            f"⚡ Космическая энергия поймана! ⚡\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🪐 Получен космический питомец!\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌌 Редкое существо из глубин космоса присоединилось к вам!"
+        )
+    
+    btns = [
+        InlineKeyboardButton("🔄 Попробовать снова", callback_data="galactic_storm"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="back"),
+    ]
+    kb = InlineKeyboardMarkup([btns])
+    
+    await edit_section(
+        query,
+        caption=text,
+        image_key="galactic",
+        reply_markup=kb,
+    )
+
+
+async def toggle_galactic_storm(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Переключает галактическое событие (только для админов)."""
+    if not is_admin(query.from_user.id):
+        await edit_section(query, caption="❌ Доступ запрещён.", image_key="galactic")
+        return
+    
+    if is_galactic_storm_active():
+        stop_galactic_storm()
+        status = "остановлено"
+    else:
+        start_galactic_storm()
+        status = "запущено"
+        # Уведомляем всех игроков
+        txt = "🌌⚡ Галактический шторм начался! Поймайте космическую энергию! 🪐"
+        cur.execute("SELECT user_id FROM users")
+        for (uid,) in cur.fetchall():
+            try:
+                context.bot.send_message(uid, txt)
+            except Exception:
+                pass
+    
+    await edit_section(
+        query,
+        caption=f"🌌 Галактическое событие {status}.",
+        image_key="galactic",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+        ),
+    )
+
+
+# ----------------------------------------------------------------------
 #   Промокоды
 # ----------------------------------------------------------------------
 def add_promo(
@@ -2126,6 +2495,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("📜 Журнал действий", callback_data="admin_view_logs"),
         InlineKeyboardButton("🎟️ Создать промокод", callback_data="admin_create_promo"),
         InlineKeyboardButton("🍂 Переключить осеннее событие", callback_data="admin_toggle_autumn"),
+        InlineKeyboardButton("🌌 Переключить галактический шторм", callback_data="admin_toggle_galactic"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back"),
     ]
     kb = chunk_buttons(btns, per_row=2)
@@ -2247,6 +2617,9 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
         return
+    if data == "admin_toggle_galactic":
+        await toggle_galactic_storm(query, context)
+        return
     await edit_section(query, caption="❓ Неизвестная команда.", image_key="admin")
 
 
@@ -2354,8 +2727,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "autumn_event":
         await autumn_event_info(query, context)
         return
+    if data == "autumn_portal":
+        await autumn_event_info(query, context)
+        return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
+        return
+    # ------------------- Галактическое событие -------------------
+    if data == "galactic_storm":
+        await galactic_storm_section(query, context)
+        return
+    if data == "galactic_catch_energy":
+        await galactic_catch_energy(query, context)
+        return
+    if data == "galactic_wait":
+        await galactic_storm_section(query, context)
         return
     # ------------------- Промокоды -------------------
     if data == "promo":
