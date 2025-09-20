@@ -411,6 +411,24 @@ def get_user(user_id: int) -> sqlite3.Row:
     return row
 
 
+def get_total_users() -> int:
+    """Возвращает общее количество пользователей."""
+    cur.execute("SELECT COUNT(*) as count FROM users")
+    return cur.fetchone()["count"]
+
+
+def get_active_users(days: int = 7) -> int:
+    """Возвращает количество активных пользователей за последние N дней."""
+    cutoff_time = int(time.time()) - (days * 24 * 3600)
+    cur.execute("SELECT COUNT(*) as count FROM users WHERE last_active > ?", (cutoff_time,))
+    return cur.fetchone()["count"]
+
+
+def update_user_activity(user_id: int) -> None:
+    """Обновляет время последней активности пользователя."""
+    _execute("UPDATE users SET last_active = ? WHERE user_id = ?", (int(time.time()), user_id))
+
+
 def set_pet_last_fed(user_id: int, pet_field: str, timestamp: int) -> None:
     _execute(
         """
@@ -1063,10 +1081,23 @@ async def edit_section(
 ) -> None:
     """Редактирует сообщение, заменяя фото на фото из SECTION_IMAGES[image_key]."""
     img = SECTION_IMAGES.get(image_key, MAIN_MENU_IMG)  # fallback
-    await query.edit_message_media(
-        media=InputMediaPhoto(media=img, caption=caption),
-        reply_markup=reply_markup,
-    )
+    
+    # Ограничиваем длину caption до 1024 символов (лимит Telegram)
+    if len(caption) > 1024:
+        caption = caption[:1021] + "..."
+    
+    try:
+        await query.edit_message_media(
+            media=InputMediaPhoto(media=img, caption=caption),
+            reply_markup=reply_markup,
+        )
+    except Exception as e:
+        # Если не удалось отредактировать медиа, попробуем отредактировать только текст
+        try:
+            await query.edit_message_caption(caption=caption, reply_markup=reply_markup)
+        except Exception:
+            # В крайнем случае просто отвечаем на callback
+            await query.answer("Сообщение обновлено")
 
 
 # ----------------------------------------------------------------------
@@ -2119,6 +2150,7 @@ async def admin_panel(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("🔄 Сброс топа", callback_data="admin_reset_top"),
         InlineKeyboardButton("🔁 Сброс всех аккаунтов", callback_data="admin_reset_all"),
         InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+        InlineKeyboardButton("👥 Счетчик игроков", callback_data="admin_player_count"),
         InlineKeyboardButton("🕷️ Выдать паука‑секрета", callback_data="admin_give_spider"),
         InlineKeyboardButton("💰 Выдать монеты", callback_data="admin_set_coins"),
         InlineKeyboardButton("➕ Добавить монеты", callback_data="admin_add_coins"),
@@ -2244,6 +2276,29 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             ),
         )
         return
+    if data == "admin_player_count":
+        total_users = get_total_users()
+        active_users_7d = get_active_users(7)
+        active_users_1d = get_active_users(1)
+        
+        caption = (
+            f"👥 Статистика игроков\n\n"
+            f"📊 Всего пользователей: {format_num(total_users)}\n"
+            f"🟢 Активных за 7 дней: {format_num(active_users_7d)}\n"
+            f"🟡 Активных за 1 день: {format_num(active_users_1d)}\n\n"
+            f"📈 Процент активности (7д): {round((active_users_7d / total_users * 100) if total_users > 0 else 0, 1)}%\n"
+            f"📈 Процент активности (1д): {round((active_users_1d / total_users * 100) if total_users > 0 else 0, 1)}%"
+        )
+        
+        await edit_section(
+            query,
+            caption=caption,
+            image_key="admin",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin")]]
+            ),
+        )
+        return
     if data == "admin_toggle_autumn":
         await toggle_autumn_event(query, context)
         return
@@ -2255,6 +2310,8 @@ async def admin_actions(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ----------------------------------------------------------------------
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    # Обновляем активность пользователя при любом взаимодействии
+    update_user_activity(query.from_user.id)
     try:
         await query.answer()
     except Exception:
@@ -2380,6 +2437,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     txt = update.message.text if update.message else ""
     user = update.effective_user
     db_user = get_user(user.id)
+    # Обновляем активность пользователя
+    update_user_activity(user.id)
     # Проверяем, не наступил ли новый сезон
     check_and_reset_season()
     # Реферальный параметр: /start <ref_id>
@@ -2874,6 +2933,22 @@ def main() -> None:
         return
     add_admins()
     app = ApplicationBuilder().token(TOKEN).build()
+    
+    # Добавляем обработчик ошибок
+    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обрабатывает ошибки и логирует их."""
+        log.error("Exception while handling an update:", exc_info=context.error)
+        
+        # Отправляем сообщение об ошибке пользователю, если это возможно
+        if update and update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "❌ Произошла ошибка. Попробуйте позже или обратитесь к администратору."
+                )
+            except Exception:
+                pass  # Игнорируем ошибки при отправке сообщения об ошибке
+    
+    app.add_error_handler(error_handler)
     # Основные команды
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("pets", pets_command))
@@ -2911,6 +2986,20 @@ def main() -> None:
         interval=86400,
         first=5,
     )                  # проверка сезона
+    
+    # Фоновая задача для обновления статистики игроков (каждые 5 минут)
+    async def update_player_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обновляет статистику игроков."""
+        try:
+            total_users = get_total_users()
+            active_users_7d = get_active_users(7)
+            active_users_1d = get_active_users(1)
+            log.info(f"Статистика игроков: всего={total_users}, активных за 7д={active_users_7d}, активных за 1д={active_users_1d}")
+        except Exception as e:
+            log.error(f"Ошибка при обновлении статистики игроков: {e}")
+    
+    app.job_queue.run_repeating(update_player_stats, interval=300, first=60)  # каждые 5 минут
+    
     app.run_polling()
 
 
